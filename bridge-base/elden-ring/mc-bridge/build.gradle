@@ -1,0 +1,53 @@
+plugins {
+	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+}
+
+base {
+	archivesName = 'er-bridge'
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"erbridge" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+
+	runs {
+		client {
+			programArgs '--username', 'Steve'
+			vmArgs '-Xms512m', '-Xmx3g'
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	modRuntimeOnly files('../../../.tools/mods/BorderlessFullscreen-v2.4.1-mc1.21.1.jar')
+	modRuntimeOnly files('../../../.tools/mods/b100lib-0.2.2-1.21.1.jar')
+}
+
+processResources {
+	def version = project.version
+	inputs.property "version", version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
