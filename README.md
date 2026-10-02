@@ -1,5 +1,9 @@
 # Minecraft Ring
 
+At the moment, there are some bugs; they will be fixed in the near future.
+
+There are bugs with F8, and there may be bugs with overlaying the Minecraft window.
+
 Minecraft building and movement in the Lands Between.
 
 Minecraft Ring runs Minecraft alongside Elden Ring and brings Minecraft's player,
@@ -19,7 +23,6 @@ still need wider testing; this is a research mod with rough edges.
 - Use Minecraft's inventory and switch between first and third person.
 - Interact with Elden Ring doors, items and Sites of Grace.
 - Switch control back to Elden Ring with F8.
-- Hide Minecraft blocks behind Elden Ring geometry using the host depth buffer.
 
 ## How the bridge works
 
