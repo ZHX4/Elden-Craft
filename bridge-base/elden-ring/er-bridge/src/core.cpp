@@ -57,6 +57,7 @@ extern "C" __declspec(dllexport) bool erb_core_init() {
     using namespace mb;
     if (!shm_open()) return false;
     log("core: init");
+    crash_init();
     MH_STATUS st = MH_Initialize();
     if (st != MH_OK && st != MH_ERROR_ALREADY_INITIALIZED) {
         log("core: MH_Initialize failed %d", st);
@@ -94,6 +95,7 @@ extern "C" __declspec(dllexport) void erb_core_shutdown() {
     MH_Uninitialize();
     compositor_shutdown();
     game_shutdown();
+    crash_shutdown();
     shm_close();
     log("core: shutdown complete");
     log_close();

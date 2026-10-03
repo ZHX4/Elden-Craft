@@ -3,6 +3,13 @@
 !/.gitignore
 !/.gitattributes
 !/README.md
+!/CHANGELOG.md
+!/docs/
+/docs/*
+!/docs/*.md
+!/docs/images/
+/docs/images/*
+!/docs/images/minecraft-ring.jpg
 !/LICENSE
 !/THIRD_PARTY_NOTICES.md
 !/Install.ps1
@@ -17,8 +24,10 @@
 !/bridge-base/
 /bridge-base/*
 !/bridge-base/LICENSE
+!/bridge-base/README.md
 !/bridge-base/elden-ring/
 /bridge-base/elden-ring/*
+!/bridge-base/elden-ring/README.md
 !/bridge-base/elden-ring/er-bridge/
 /bridge-base/elden-ring/er-bridge/*
 !/bridge-base/elden-ring/er-bridge/Makefile

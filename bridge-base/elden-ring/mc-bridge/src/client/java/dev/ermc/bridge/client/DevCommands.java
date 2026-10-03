@@ -146,6 +146,19 @@ public final class DevCommands {
 			case "screenshot" -> Screenshot.grab(mc.gameDirectory, (arg.isEmpty() ? "devcmd" : arg) + ".png",
 				mc.getMainRenderTarget(), msg -> LOG.info("[devcmd] {}", msg.getString()));
 			case "status" -> status(mc);
+			case "passagecheck" -> {
+				if (mc.player != null && mc.level != null) {
+					Vec3 direction = mc.player.getViewVector(1).multiply(1, 0, 1).normalize();
+					var body = mc.player.getBoundingBox();
+					LOG.info("[devcmd] passagecheck client: {}", passageCheck(mc.level, mc.player, body, direction));
+					var server = mc.getSingleplayerServer();
+					if (server != null) server.execute(() -> {
+						var player = server.getPlayerList().getPlayer(mc.player.getUUID());
+						if (player != null) LOG.info("[devcmd] passagecheck server: {}",
+							passageCheck(player.serverLevel(), player, body, direction));
+					});
+				}
+			}
 			case "quit" -> mc.stop();  // saves the world, like the Quit button
 			case "save" -> {
 				// Save the world now without pausing or quitting (single-player has no /save-all).
@@ -164,6 +177,14 @@ public final class DevCommands {
 					default -> { }
 				}
 				LOG.info("[devcmd] terrain {}", dev.ermc.bridge.TerrainManager.describeSettings());
+				if (v[0].equals("status") && mc.player != null) {
+					var server = mc.getSingleplayerServer();
+					var id = mc.player.getUUID();
+					if (server != null) server.execute(() -> {
+						var player = server.getPlayerList().getPlayer(id);
+						if (player != null) LOG.info("[devcmd] terrain prefetch: {}", dev.ermc.bridge.TerrainManager.describePrefetch(player));
+					});
+				}
 			}
 			case "switch" -> {
 				if (arg.equals("host")) {
@@ -208,5 +229,16 @@ public final class DevCommands {
 		LOG.info("[devcmd] status: player {} yaw {} pitch {} onGround {} flying {} cam {} camType {} overlay {} target {} anchor {}",
 			mc.player.position(), mc.player.getYRot(), mc.player.getXRot(), mc.player.onGround(),
 			mc.player.getAbilities().flying, cam, mc.options.getCameraType(), Overlay.active(), target, CoordMap.get());
+	}
+
+	private static String passageCheck(net.minecraft.world.level.Level level, net.minecraft.world.entity.Entity player,
+		net.minecraft.world.phys.AABB body, Vec3 direction) {
+		double clear = 0;
+		for (double distance = .125; distance <= 4; distance += .125) {
+			if (!level.noCollision(player, body.move(direction.scale(distance)))) break;
+			clear = distance;
+		}
+		boolean floor = !level.noCollision(player, body.move(0, -.125, 0));
+		return "forward clearance " + clear + " m; floor support " + floor;
 	}
 }

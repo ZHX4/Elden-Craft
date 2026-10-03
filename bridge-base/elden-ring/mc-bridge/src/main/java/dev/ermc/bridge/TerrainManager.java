@@ -59,21 +59,14 @@ public final class TerrainManager {
 	 */
 	private static final double RAY_ABOVE = 2.2;
 	private static final double RAY_BELOW = 40.0;
-	/**
-	 * Re-sample a column when the player is this much higher/lower than when it was sampled. No
-	 * more than RAY_ABOVE: the ray must still reach ground up to that far above the sample height
-	 * (stairs, ramps).
-	 */
-	private static final double RESAMPLE_DY = 2.0;
 	/** Solid terrain thickness below the host game's surface. */
 	private static final int THICKNESS = 2;
-	/** Obstacle probes: horizontal rays across each column at this height above the player's feet. */
-	private static final double PROBE_HEIGHT = 1.0;
+	/** Probe feet, body and head, including both diagonals and both segment directions. */
+	private static final double[] PROBE_HEIGHTS = {.35, 1, TerrainClearance.HEAD};
 	/** Obstacles fill their column up to this far above the player's feet. */
 	private static final double WALL_HEIGHT = 3.0;
-	/** Rays per column: down from above the head, down from high above, across X, across Z. */
-	private static final int RAYS_PER_COLUMN = 4;
-	private static final int BATCH = 1020;
+	private static final int RAYS_PER_COLUMN = TerrainClearance.COARSE_RAYS;
+	private static final int BATCH = 2048;
 	/** High ray: finds ground that rises above the player's head (hills, cliffs ahead). */
 	private static final double RAY_HIGH = 40.0;
 	/** Hills/cliffs above the player are filled at most this far above the player's feet. */
@@ -95,8 +88,10 @@ public final class TerrainManager {
 	private static final long RAY_TIMEOUT_MS = 3000;
 
 	/** What was placed in a column: terrain blocks from bottom..top (inclusive). */
-	private record Column(double sampleY, int top, int bottom) {
+	private record Column(TerrainPrefetch.Sample sample, int top, int bottom, int floorBlock, int height, boolean obstacle) {
 	}
+	private record PendingColumn(long key, double y, double fromX, double fromZ) {}
+	private record Forecast(ServerPlayer player, double aheadX, double aheadZ) {}
 
 	private static final GameState STATE = new GameState();
 	/** Anchors per host-game zone id; each zone gets its own Minecraft region. */
@@ -116,32 +111,49 @@ public final class TerrainManager {
 	private static int lastHostLife = Integer.MIN_VALUE;
 	private static final LongOpenHashSet FLOORED_CHUNKS = new LongOpenHashSet();
 	private static final Long2ObjectOpenHashMap<Column> COLUMNS = new Long2ObjectOpenHashMap<>();
-	private static boolean bridgeWorld;
+	private static volatile boolean bridgeWorld;
+	private static final java.util.Set<Long> WAITING_DETAIL = java.util.concurrent.ConcurrentHashMap.newKeySet();
+	private static final java.util.Map<java.util.UUID, Vec3> LAST_POSITIONS = new java.util.HashMap<>();
+	private static boolean preferBackground;
+	private static long coarseBatches, lastBatchMs, maxBatchMs;
+	private static final java.util.Map<java.util.UUID, MovingPlatformMotion> PLATFORM_MOTION = new java.util.HashMap<>();
+	private static final LongOpenHashSet MOVING_COLUMNS = new LongOpenHashSet();
+	private static final MovingPlatformBoarding PLATFORM_BOARDING = new MovingPlatformBoarding();
 
 	// Ray batch in flight
 	private static int pendingSeq = -1;
 	private static long pendingSince;
-	private static final List<long[]> PENDING_COLUMNS = new ArrayList<>(); // {columnKey, sampleY*16}
+	private static CoordMap.Mapping pendingMap;
+	private static boolean pendingStallReported;
+	private static final List<PendingColumn> PENDING_COLUMNS = new ArrayList<>();
+	/** A door/prop changed after these columns' rays were submitted. */
+	private static final LongOpenHashSet INVALIDATED_PENDING = new LongOpenHashSet();
 	private static final float[] RAYS = new float[BATCH * 6];
 	private static final float[] HITS = new float[BATCH * 6];
 	private static final int[] HIT_FLAGS = new int[BATCH];
 	private static final int[] HIT_ATTRS = new int[BATCH];
 	/** 0 = unknown, 1 = rays work, -1 = no ray support (fall back to a flat floor). */
 	private static int rayMode;
-	private static int rayFailures;
 
 	public static boolean isBridgeWorld() {
 		return bridgeWorld;
 	}
 
 	public static void reset() {
+		TerrainDetailManager.reset();
 		bridgeWorld = false;
+		WAITING_DETAIL.clear();
+		LAST_POSITIONS.clear();
+		PLATFORM_MOTION.clear();
+		MOVING_COLUMNS.clear();
+		preferBackground = false;
+		coarseBatches = lastBatchMs = maxBatchMs = 0;
 		FLOORED_CHUNKS.clear();
 		COLUMNS.clear();
 		PENDING_COLUMNS.clear();
+		INVALIDATED_PENDING.clear();
 		pendingSeq = -1;
 		rayMode = 0;
-		rayFailures = 0;
 		ANCHORS.clear();
 		legacyAnchor = null;
 		CoordMap.set(null);
@@ -190,7 +202,7 @@ public final class TerrainManager {
 			int radius = r.length > 3 ? (int) r[3] : 2;
 			for (int dx = -radius; dx <= radius; dx++) {
 				for (int dz = -radius; dz <= radius; dz++) {
-					COLUMNS.remove(ChunkPos.asLong((int) r[0] + dx, (int) r[1] + dz));
+					invalidate(ChunkPos.asLong((int) r[0] + dx, (int) r[1] + dz));
 				}
 			}
 		}
@@ -224,6 +236,42 @@ public final class TerrainManager {
 		int[] f = rayFilter;
 		return "filter " + (f == null ? "none" : String.format("(%d, %#x, %d)", f[0], f[1], f[2]))
 			+ String.format(" wallIgnore %#x columns %d", wallIgnoreMask, COLUMNS.size());
+	}
+
+	private static void invalidate(long key) {
+		if (pendingSeq >= 0 && BATCH_KEYS.contains(key)) INVALIDATED_PENDING.add(key);
+		COLUMNS.remove(key);
+		WAITING_DETAIL.remove(key);
+		TerrainDetailManager.invalidate(ChunkPos.getX(key), ChunkPos.getZ(key));
+	}
+
+	public static void detailReady(int x, int z) { WAITING_DETAIL.remove(ChunkPos.asLong(x, z)); }
+	public static boolean detailPending(int x, int z) { return WAITING_DETAIL.contains(ChunkPos.asLong(x, z)); }
+
+	/** Dev diagnostics run on the server thread, so counts and mailbox timing form one snapshot. */
+	public static String describePrefetch(ServerPlayer player) {
+		int sampled = 0, missing = 0;
+		long now = System.currentTimeMillis();
+		for (int dx = -TerrainPrefetch.NEAR_RADIUS; dx <= TerrainPrefetch.NEAR_RADIUS; dx++) {
+			for (int dz = -TerrainPrefetch.NEAR_RADIUS; dz <= TerrainPrefetch.NEAR_RADIUS; dz++) {
+				if (dx * dx + dz * dz > TerrainPrefetch.NEAR_RADIUS * TerrainPrefetch.NEAR_RADIUS) continue;
+				int x = Mth.floor(player.getX()) + dx, z = Mth.floor(player.getZ()) + dz;
+				Column column = COLUMNS.get(ChunkPos.asLong(x, z));
+				if (!TerrainPrefetch.needsSample(column == null ? null : column.sample(), x, z,
+					player.getX(), player.getY(), player.getZ(), now, true)) sampled++;
+				else missing++;
+			}
+		}
+		Vec3 look = player.getViewVector(1).multiply(1, 0, 1).normalize();
+		StringBuilder ahead = new StringBuilder();
+		for (int d : new int[] {4, 8, 12, 16, 20}) {
+			int x = Mth.floor(player.getX() + look.x * d), z = Mth.floor(player.getZ() + look.z * d);
+			Column column = COLUMNS.get(ChunkPos.asLong(x, z));
+			ahead.append(d).append("m=").append(column == null ? "pending" : "sampled").append(' ');
+		}
+		return "movement normal; nearby sampled " + sampled + " awaitingRefresh " + missing + " waitingDetail " + WAITING_DETAIL.size()
+			+ " ahead " + ahead + "batches " + coarseBatches + " last/max ms " + lastBatchMs + "/" + maxBatchMs
+			+ " coarsePending " + (pendingSeq < 0 ? 0 : now - pendingSince) + " detailPending " + TerrainDetailManager.busy();
 	}
 
 	public static void onServerStarted(MinecraftServer server) {
@@ -317,23 +365,73 @@ public final class TerrainManager {
 				}
 			}
 			COLUMNS.clear();
+			WAITING_DETAIL.clear();
+			TerrainDetailManager.reset();
 			pendingSeq = -1;
 			PENDING_COLUMNS.clear();
 			LOG.info("Terrain reset ({})", describeSettings());
 		}
 		updatePassages(map);
+		updateMovingSupport(level, map, players);
 		collectResults(level, map);
 		resampleStruck();
-		if (pendingSeq < 0 && !players.isEmpty()) {
-			submitRays(map, players);
+		TerrainDetailManager.collectResults(level, map);
+		List<Forecast> forecasts = new ArrayList<>();
+		for (ServerPlayer player : players) {
+			Vec3 previous = LAST_POSITIONS.put(player.getUUID(), player.position());
+			Vec3 velocity = previous == null ? Vec3.ZERO : player.position().subtract(previous).scale(20);
+			Vec3 look = player.getViewVector(1);
+			double[] ahead = TerrainPrefetch.ahead(player.getX(), player.getZ(), velocity.x, velocity.z, look.x, look.z);
+			forecasts.add(new Forecast(player, ahead[0], ahead[1]));
+		}
+		if (pendingSeq < 0 && !TerrainDetailManager.busy() && !players.isEmpty()) {
+			// No refinement batch may postpone unverified terrain under or ahead of a player.
+			int n = prepareRays(map, players, forecasts, true);
+			if (n > 0) submitRays(map, n);
+			else if (!preferBackground && TerrainDetailManager.submit(map, players)) preferBackground = true;
+			else {
+				n = prepareRays(map, players, forecasts, false);
+				if (n > 0) { submitRays(map, n); preferBackground = false; }
+				else if (TerrainDetailManager.submit(map, players)) preferBackground = true;
+			}
 		}
 		logAttrStats();
 	}
 
+	private static void updateMovingSupport(ServerLevel level, CoordMap.Mapping map, List<ServerPlayer> players) {
+		LongOpenHashSet previous = new LongOpenHashSet(MOVING_COLUMNS);
+		MOVING_COLUMNS.clear();
+		Vec3 support = map.toMc(STATE.supportPos[0], STATE.supportPos[1], STATE.supportPos[2]);
+		if (map.zone() == STATE.stageId && recallSettled(400)) PLATFORM_BOARDING.refresh(level, map, MOVING_COLUMNS);
+		for (ServerPlayer player : players) {
+			MovingPlatformMotion motion = PLATFORM_MOTION.computeIfAbsent(player.getUUID(), id -> new MovingPlatformMotion());
+			boolean valid = STATE.has(Protocol.STATE_SUPPORT_VALID) && map.zone() == STATE.stageId && recallSettled(400)
+				&& Math.abs(player.getX() - support.x) < .75 && Math.abs(player.getZ() - support.z) < .75;
+			var step = motion.update(valid, STATE.supportEpoch, STATE.supportTravelY / map.unitsPerMeter(), support.y,
+				player.getY(), player.onGround(), player.getAbilities().flying, player.getDeltaMovement().y, System.currentTimeMillis());
+			if (!step.moving()) continue;
+			MovingPlatformTerrain.move(level, player.position(), step.previousFloor(), step.floor());
+			for (int x = Mth.floor(player.getX() - .3); x <= Mth.floor(player.getX() + .3); x++)
+				for (int z = Mth.floor(player.getZ() - .3); z <= Mth.floor(player.getZ() + .3); z++)
+					MOVING_COLUMNS.add(ChunkPos.asLong(x, z));
+			if (step.dy() != 0 || step.landed()) {
+				// The client predicts the same absolute support height. Its movement
+				// packet may already have arrived: never add the travel a second time.
+				player.setPos(player.getX(), MovingPlatformMotion.collisionHeight(step.floor()), player.getZ());
+				player.setOnGround(true);
+				player.fallDistance = 0;
+			}
+		}
+		for (long key : previous) if (!MOVING_COLUMNS.contains(key)) invalidate(key);
+	}
+
+	public static boolean movingColumn(int x, int z) { return MOVING_COLUMNS.contains(ChunkPos.asLong(x, z)); }
+
 	// -- ray-sampled terrain ----------------------------------------------------------------------
 
 	/** Queues the unsampled columns within {@code radius} of a point, nearest first. Returns the new ray count. */
-	private static int sampleAround(CoordMap.Mapping map, double ex, double ey, double ez, int radius, int n) {
+	private static int sampleAround(CoordMap.Mapping map, double ex, double ey, double ez, int radius, int n,
+		boolean priority, double fromX, double fromZ) {
 		int px = Mth.floor(ex);
 		int pz = Mth.floor(ez);
 		double py = ey;
@@ -347,16 +445,22 @@ public final class TerrainManager {
 					int x = px + dx;
 					int z = pz + dz;
 					long key = ChunkPos.asLong(x, z);
+					if (MOVING_COLUMNS.contains(key)) continue;
 					Column c = COLUMNS.get(key);
-					if ((c != null && Math.abs(c.sampleY() - py) < RESAMPLE_DY) || !BATCH_KEYS.add(key)) {
+					if (!TerrainPrefetch.needsSample(c == null ? null : c.sample(), x, z, fromX, py, fromZ,
+						System.currentTimeMillis(), priority) || !BATCH_KEYS.add(key)) {
 						continue;
 					}
-					double hy = py + PROBE_HEIGHT;
 					putRay(map, n++, x + 0.5, py + RAY_ABOVE, z + 0.5, x + 0.5, py - RAY_BELOW, z + 0.5);
 					putRay(map, n++, x + 0.5, py + RAY_HIGH, z + 0.5, x + 0.5, py + RAY_ABOVE, z + 0.5);
-					putRay(map, n++, x, hy, z + 0.5, x + 1.0, hy, z + 0.5);
-					putRay(map, n++, x + 0.5, hy, z, x + 0.5, hy, z + 1.0);
-					PENDING_COLUMNS.add(new long[] {key, Math.round(py * 16)});
+					for (double height : PROBE_HEIGHTS) {
+						for (TerrainClearance.Segment segment : TerrainClearance.WALL_SEGMENTS) {
+							double x0 = x + segment.x0(), z0 = z + segment.z0(), x1 = x + segment.x1(), z1 = z + segment.z1();
+							putRay(map, n++, x0, py + height, z0, x1, py + height, z1);
+							putRay(map, n++, x1, py + height, z1, x0, py + height, z0);
+						}
+					}
+					PENDING_COLUMNS.add(new PendingColumn(key, Math.round(py * 16) / 16.0, fromX, fromZ));
 				}
 			}
 		}
@@ -369,14 +473,23 @@ public final class TerrainManager {
 	private static final int MAX_SAMPLED_MOBS = 24;
 	private static final LongOpenHashSet BATCH_KEYS = new LongOpenHashSet();
 
-	private static void submitRays(CoordMap.Mapping map, List<ServerPlayer> players) {
+	private static int prepareRays(CoordMap.Mapping map, List<ServerPlayer> players, List<Forecast> forecasts, boolean priority) {
 		PENDING_COLUMNS.clear();
+		INVALIDATED_PENDING.clear();
 		BATCH_KEYS.clear();
 		int n = 0;
 		for (ServerPlayer player : players) {
-			n = sampleAround(map, player.getX(), player.getY(), player.getZ(), SAMPLE_RADIUS, n);
+			n = sampleAround(map, player.getX(), player.getY(), player.getZ(), priority ? TerrainPrefetch.NEAR_RADIUS : SAMPLE_RADIUS,
+				n, priority, player.getX(), player.getZ());
 		}
-		if (!players.isEmpty() && n + RAYS_PER_COLUMN <= BATCH) {
+		if (priority) {
+			for (Forecast forecast : forecasts) {
+				ServerPlayer player = forecast.player();
+				n = sampleAround(map, forecast.aheadX(), player.getY(), forecast.aheadZ(), TerrainPrefetch.NEAR_RADIUS,
+					n, true, player.getX(), player.getZ());
+			}
+		}
+		if (!priority && !players.isEmpty() && n + RAYS_PER_COLUMN <= BATCH) {
 			ServerPlayer first = players.get(0);
 			AABB range = first.getBoundingBox().inflate(MOB_SAMPLE_RANGE);
 			List<net.minecraft.world.entity.Mob> mobs = first.serverLevel().getEntitiesOfClass(net.minecraft.world.entity.Mob.class,
@@ -384,17 +497,20 @@ public final class TerrainManager {
 			mobs.sort((a, b) -> Double.compare(a.distanceToSqr(first), b.distanceToSqr(first)));
 			for (int i = 0; i < mobs.size() && i < MAX_SAMPLED_MOBS && n + RAYS_PER_COLUMN <= BATCH; i++) {
 				net.minecraft.world.entity.Mob m = mobs.get(i);
-				n = sampleAround(map, m.getX(), m.getY(), m.getZ(), MOB_SAMPLE_RADIUS, n);
+				n = sampleAround(map, m.getX(), m.getY(), m.getZ(), MOB_SAMPLE_RADIUS, n, false, m.getX(), m.getZ());
 			}
 		}
-		if (n == 0) {
-			return;
-		}
+		return n;
+	}
+
+	private static void submitRays(CoordMap.Mapping map, int n) {
 		int[] filter = rayFilter;
 		int seq = ErLink.get().submitRays(RAYS, n, filter != null ? dev.ermc.bridge.link.Protocol.RAYS_CUSTOM_FILTER : 0, filter);
 		if (seq >= 0) {
 			pendingSeq = seq;
+			pendingMap = map;
 			pendingSince = System.currentTimeMillis();
+			pendingStallReported = false;
 		} else {
 			PENDING_COLUMNS.clear();
 		}
@@ -419,7 +535,17 @@ public final class TerrainManager {
 			return false;
 		}
 		double ny = HITS[ray * 6 + 4];
-		return Math.abs(ny) < 0.7 && groundY < probeY - 0.25;
+		return Math.abs(ny) < 0.7 && TerrainClearance.wallNeedsColumn(true, Double.isFinite(groundY), groundY, probeY);
+	}
+
+	private static boolean columnObstacle(int down, double groundY, double sampleY, CoordMap.Mapping map) {
+		int raysPerHeight = TerrainClearance.WALL_SEGMENTS.size() * 2;
+		boolean obstacle = false;
+		for (int ray = down + 2; ray < down + RAYS_PER_COLUMN; ray++) {
+			double height = PROBE_HEIGHTS[(ray - down - 2) / raysPerHeight];
+			obstacle |= isObstacle(ray, groundY, sampleY + height, map);
+		}
+		return obstacle;
 	}
 
 	private static void logAttrStats() {
@@ -444,14 +570,15 @@ public final class TerrainManager {
 		}
 		ErLink link = ErLink.get();
 		if (!link.raysDone(pendingSeq)) {
-			if (System.currentTimeMillis() - pendingSince > RAY_TIMEOUT_MS) {
-				pendingSeq = -1;
-				PENDING_COLUMNS.clear();
-				if (rayMode == 0 && ++rayFailures >= 2) {
-					rayMode = -1;
-					LOG.warn("Elden Ring does not answer terrain ray queries; using a flat floor at the hunter's feet");
-				}
+			if (!pendingStallReported && System.currentTimeMillis() - pendingSince > RAY_TIMEOUT_MS) {
+				pendingStallReported = true;
+				LOG.warn("Terrain ray batch stalled; retaining mailbox ownership until native processing finishes");
 			}
+			return;
+		}
+		if (!map.equals(pendingMap)) {
+			PENDING_COLUMNS.clear();
+			pendingSeq = -1;
 			return;
 		}
 		int n = PENDING_COLUMNS.size();
@@ -461,11 +588,22 @@ public final class TerrainManager {
 			LOG.info("Terrain ray queries are working");
 		}
 		BlockState terrain = ErBridgeMod.TERRAIN.defaultBlockState();
+		long now = System.currentTimeMillis();
+		lastBatchMs = now - pendingSince;
+		maxBatchMs = Math.max(maxBatchMs, lastBatchMs);
+		coarseBatches++;
 		for (int i = 0; i < n; i++) {
-			long key = PENDING_COLUMNS.get(i)[0];
-			double sampleY = PENDING_COLUMNS.get(i)[1] / 16.0;
+			PendingColumn request = PENDING_COLUMNS.get(i);
+			long key = request.key();
+			// Never reinsert a closed door's old collision after an opening event,
+			// or carve a newly closed door using pre-event clearance. Sample again.
+			if (INVALIDATED_PENDING.contains(key)) continue;
+			double sampleY = request.y();
 			int x = ChunkPos.getX(key);
 			int z = ChunkPos.getZ(key);
+			// These rays were submitted before the latest lift position. The live
+			// support cells own this column until motion stops or the player steps off.
+			if (MOVING_COLUMNS.contains(key)) continue;
 			Column old = COLUMNS.get(key);
 			if (old == null) {
 				// First sample of this column since the world opened (or since a terrain reset):
@@ -478,54 +616,78 @@ public final class TerrainManager {
 					oldTop = Math.max(oldTop, FLOOR_Y);
 					oldBottom = Math.min(oldBottom, FLOOR_Y);
 				}
-				old = new Column(0, oldTop, oldBottom);
+				old = new Column(null, oldTop, oldBottom, 0, 0, false);
 			}
 			int top = Integer.MIN_VALUE;
 			int bottom = Integer.MIN_VALUE;
 			int down = i * RAYS_PER_COLUMN;
 			int high = down + 1;
 			boolean lowHit = HIT_FLAGS[down] != 0;
-			// Ground above the ray start (uphill, a cliff ahead): the low ray started inside the
-			// terrain and found nothing, but the high ray lands on an upward-facing surface.
-			boolean hillHit = !lowHit && HIT_FLAGS[high] != 0 && HITS[high * 6 + 4] > 0.3F;
+			// A high ray also hits bridges, ceilings and another wheel platform far
+			// overhead. Extrude a cliff only when the body probes confirm solid
+			// geometry here; otherwise leave the verified air below it open.
+			boolean highSurface = HIT_FLAGS[high] != 0 && HITS[high * 6 + 4] > 0.3F;
+			boolean highBlocksBody = !lowHit && highSurface && columnObstacle(down, Double.NaN, sampleY, map);
+			boolean hillHit = TerrainClearance.hillNeedsColumn(lowHit, highSurface, highBlocksBody);
+			double groundY = Double.NaN;
+			int topBlock = Integer.MIN_VALUE, height = 16;
+			boolean obstacle;
 			if (lowHit || hillHit) {
 				int g = lowHit ? down : high;
 				GROUND_ATTRS.merge(HIT_ATTRS[g], 1, Integer::sum);
 				Vec3 hit = map.toMc(HITS[g * 6], HITS[g * 6 + 1], HITS[g * 6 + 2]);
-				double groundY = hit.y;
+				groundY = hit.y;
 				if (hillHit) {
 					groundY = Math.min(groundY, sampleY + CLIFF_FILL);
 				}
-				int topBlock = Mth.floor(groundY - 1e-4);
-				int height = Mth.clamp((int) Math.ceil((groundY - topBlock) * 16.0 - 1e-3), 1, 16);
-				double probeY = sampleY + PROBE_HEIGHT;
-				boolean obstacle = (isObstacle(down + 2, groundY, probeY, map) || isObstacle(down + 3, groundY, probeY, map))
-					&& !inPassage(x + 0.5, z + 0.5, groundY);
+				topBlock = Mth.floor(groundY - 1e-4);
+				height = Mth.clamp((int) Math.ceil((groundY - topBlock) * 16.0 - 1e-3), 1, 16);
+				obstacle = columnObstacle(down, groundY, sampleY, map);
 				top = topBlock;
 				bottom = hillHit ? Math.min(topBlock, Mth.floor(sampleY) - THICKNESS) : topBlock - THICKNESS;
 				if (obstacle) {
-					// Wall, trunk, rock...: solid from the ground up past head height.
 					top = Math.max(topBlock, Mth.floor(sampleY + WALL_HEIGHT));
-					for (int y = top; y > topBlock; y--) {
-						setTerrain(level, x, y, z, terrain);
-					}
-					setTerrain(level, x, topBlock, z, terrain);
-				} else {
-					setTerrain(level, x, topBlock, z, terrain.setValue(TerrainBlock.HEIGHT, height));
 				}
-				for (int y = topBlock - 1; y >= bottom; y--) {
-					setTerrain(level, x, y, z, terrain);
-				}
-			}
-			if (old != null && old.top() != Integer.MIN_VALUE) {
-				// Remove what the previous sample placed and this one didn't.
-				for (int y = old.bottom(); y <= old.top(); y++) {
-					if (top == Integer.MIN_VALUE || y < bottom || y > top) {
-						clearTerrain(level, x, y, z);
-					}
+			} else {
+				obstacle = columnObstacle(down, groundY, sampleY, map);
+				if (obstacle) {
+					// A downward ray inside a wall can miss every horizontal surface. The
+					// horizontal hit must still produce a barrier; refinement can open only
+					// the neighbouring subcells with native floor support and clearance.
+					top = Mth.floor(sampleY + WALL_HEIGHT);
+					bottom = Mth.floor(sampleY) - THICKNESS;
 				}
 			}
-			COLUMNS.put(key, new Column(sampleY, top, bottom));
+			// Refresh evidence without replacing an unchanged, already refined arch with full cubes.
+			boolean changed = old.sample() == null || old.top() != top || old.bottom() != bottom
+				|| old.floorBlock() != topBlock || old.height() != height || old.obstacle() != obstacle
+				|| Math.abs(old.sample().y() - sampleY) >= .25;
+			if (changed) {
+				boolean needsDetail = obstacle || groundY > sampleY + .3;
+				TerrainDetailManager.noteColumn(x, z, sampleY, needsDetail,
+					top, bottom, topBlock, height, obstacle);
+				WAITING_DETAIL.remove(key);
+				if (top != Integer.MIN_VALUE) {
+					for (int y = bottom; y <= top; y++) {
+						BlockState state = !obstacle && y == topBlock ? terrain.setValue(TerrainBlock.HEIGHT, height) : terrain;
+						if (needsDetail && occupied(level, x, y, z, state)) {
+							// Keep the player's existing support and body space until the
+							// native subcells arrive; a newly discovered wall must not entomb them.
+							WAITING_DETAIL.add(key);
+							continue;
+						}
+						setTerrain(level, x, y, z, state);
+					}
+				}
+				if (old.top() != Integer.MIN_VALUE) {
+					for (int y = old.bottom(); y <= old.top(); y++) {
+						if ((top == Integer.MIN_VALUE || y < bottom || y > top)
+							&& !(WAITING_DETAIL.contains(key) && occupied(level, x, y, z, terrain))) clearTerrain(level, x, y, z);
+					}
+				}
+			}
+			TerrainPrefetch.Sample sample = new TerrainPrefetch.Sample(sampleY, request.fromX(), request.fromZ(), now);
+			COLUMNS.put(key, new Column(sample, top, bottom, topBlock, height, obstacle));
 		}
 		PENDING_COLUMNS.clear();
 		pendingSeq = -1;
@@ -542,9 +704,8 @@ public final class TerrainManager {
 
 	/**
 	 * Elden Ring's open doorways near the player. A 1 m opening at an angle to the block grid can't
-	 * be carved out of 1-block wall columns, so inside these corridors no wall blocks are placed
-	 * (floors are): open doors can be walked through. A door that opens or closes changes the
-	 * set, and its surroundings are sampled again.
+	 * be represented by 1-block wall columns. Opening or closing a door invalidates its coarse
+	 * samples; nearby wall voxels are then refined using verified native clearance and floors.
 	 */
 	private static void updatePassages(CoordMap.Mapping map) {
 		int n = ErLink.get().readPassages(PASS_RAW, PASS_ZONE);
@@ -573,7 +734,7 @@ public final class TerrainManager {
 		if (!ids.equals(passageIds)) {
 			resamplePassages(passages);
 			resamplePassages(p);
-			LOG.info("Open doorways: {} (no wall blocks inside them)", n);
+			LOG.info("Open doorways: {} (resampling collision)", n);
 			passageIds = ids;
 		}
 		passages = p;
@@ -584,26 +745,10 @@ public final class TerrainManager {
 			int r = (int) Math.ceil(p[i + 5] + p[i + 6]) + 1;
 			for (int dx = -r; dx <= r; dx++) {
 				for (int dz = -r; dz <= r; dz++) {
-					COLUMNS.remove(ChunkPos.asLong(Mth.floor(p[i]) + dx, Mth.floor(p[i + 1]) + dz));
+					invalidate(ChunkPos.asLong(Mth.floor(p[i]) + dx, Mth.floor(p[i + 1]) + dz));
 				}
 			}
 		}
-	}
-
-	private static boolean inPassage(double x, double z, double groundY) {
-		double[] p = passages;
-		for (int i = 0; i + PF <= p.length; i += PF) {
-			if (Math.abs(groundY - p[i + 2]) > 1.5) {
-				continue;
-			}
-			double dx = x - p[i], dz = z - p[i + 1];
-			double along = dx * p[i + 3] + dz * p[i + 4];
-			double across = dx * p[i + 4] - dz * p[i + 3];
-			if (Math.abs(along) <= p[i + 6] && Math.abs(across) <= p[i + 5]) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	private static boolean nearPlayer(List<ServerPlayer> players, int x, int z, int radius) {
@@ -618,16 +763,24 @@ public final class TerrainManager {
 	private static void setTerrain(ServerLevel level, int x, int y, int z, BlockState state) {
 		BlockPos pos = new BlockPos(x, y, z);
 		BlockState cur = level.getBlockState(pos);
-		if (cur.isAir() || cur.is(ErBridgeMod.TERRAIN)) {
+		if (cur.isAir() || ErBridgeMod.isTerrain(cur)) {
 			if (cur != state) {
 				level.setBlock(pos, state, Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE);
 			}
 		}
 	}
 
+	private static boolean occupied(ServerLevel level, int x, int y, int z, BlockState state) {
+		AABB block = new AABB(x, y, z, x + 1, y + state.getValue(TerrainBlock.HEIGHT) / 16.0, z + 1);
+		for (ServerPlayer player : level.players()) {
+			if (!player.isSpectator() && player.getBoundingBox().deflate(1e-5).intersects(block)) return true;
+		}
+		return false;
+	}
+
 	private static void clearTerrain(ServerLevel level, int x, int y, int z) {
 		BlockPos pos = new BlockPos(x, y, z);
-		if (level.getBlockState(pos).is(ErBridgeMod.TERRAIN)) {
+		if (ErBridgeMod.isTerrain(level.getBlockState(pos))) {
 			level.setBlock(pos, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE);
 		}
 	}
@@ -684,21 +837,23 @@ public final class TerrainManager {
 		// Something to stand on before the terrain rays for this spot come back.
 		placeFloor(level, target);
 		// Take the Tarnished's place, looking where it looks (it stands in for this player
-		// from now on). Its rotation is about +Y: forward = (sin a, 0, cos a) in Elden Ring.
+		// from now on). Its quaternion rotates the character's local forward, -Z.
 		float yaw = player.getYRot();
 		if (known) {
 			double a = 2.0 * Math.atan2(STATE.playerQuat[1], STATE.playerQuat[3]);
-			Vec3 f = map.dirToMc(Math.sin(a), 0.0, Math.cos(a));
+			Vec3 f = map.dirToMc(-Math.sin(a), 0.0, -Math.cos(a));
 			yaw = (float) Math.toDegrees(Math.atan2(-f.x, f.z));
 		}
-		player.teleportTo(level, target.x, target.y + 0.01, target.z, yaw, 0.0F);
+		player.teleportTo(level, target.x, Math.ceil(target.y * 16 - 1e-4) / 16 + 0.01, target.z, yaw, 0.0F);
 		LOG.info("Moved {} to the Tarnished at {} (yaw {})", player.getName().getString(), target, Math.round(yaw));
 	}
 
 	/** A small floor of terrain blocks under {@code feet}. */
 	private static void placeFloor(ServerLevel level, Vec3 feet) {
 		BlockState terrain = ErBridgeMod.TERRAIN.defaultBlockState();
-		int fy = Mth.floor(feet.y - 1e-3) - 1;
+		int fy = Mth.floor(feet.y - 1e-4);
+		int height = Mth.clamp((int) Math.ceil((feet.y - fy) * 16 - 1e-3), 1, 16);
+		terrain = terrain.setValue(TerrainBlock.HEIGHT, height);
 		for (int dx = -1; dx <= 2; dx++) {
 			for (int dz = -1; dz <= 1; dz++) {
 				setTerrain(level, Mth.floor(feet.x) + dx, fy, Mth.floor(feet.z) + dz, terrain);

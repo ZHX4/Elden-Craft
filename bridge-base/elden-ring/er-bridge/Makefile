@@ -13,7 +13,7 @@ LDFLAGS  := -shared -s -static -static-libgcc -static-libstdc++
 LIBS     := -luser32 -lkernel32
 
 LOADER_SRCS := src/proxy.cpp src/log.cpp src/shm.cpp
-CORE_SRCS   := src/core.cpp src/log.cpp src/shm.cpp src/memutil.cpp src/debugcmd.cpp \
+CORE_SRCS   := src/core.cpp src/crash.cpp src/log.cpp src/shm.cpp src/memutil.cpp src/debugcmd.cpp \
                src/frame.cpp src/game.cpp src/compositor.cpp
 MH_SRCS     := third_party/minhook/src/buffer.c third_party/minhook/src/hook.c \
                third_party/minhook/src/trampoline.c third_party/minhook/src/hde/hde64.c

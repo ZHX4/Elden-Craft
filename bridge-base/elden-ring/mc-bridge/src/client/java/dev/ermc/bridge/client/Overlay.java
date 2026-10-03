@@ -6,7 +6,6 @@ import dev.ermc.bridge.link.Protocol;
 import dev.ermc.bridge.TerrainManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.PauseScreen;
-import net.fabricmc.loader.api.FabricLoader;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWNativeCocoa;
 import org.lwjgl.system.JNI;
@@ -18,11 +17,11 @@ import org.slf4j.LoggerFactory;
 /**
  * Overlay mode: Minecraft's window becomes a borderless, always-on-top, transparent layer
  * glued to the host game's window. Only Minecraft's own content (blocks, entities, hand, HUD)
- * is opaque; everywhere else the host game shows through, composited by macOS.
+ * is opaque; everywhere else the host game shows through.
  *
- * <p>The window is always created with a transparent framebuffer so overlay mode can turn
- * on/off at runtime (e.g. when the host game starts after Minecraft). While off, the final
- * blit forces alpha to 1 so the window looks completely normal.
+ * <p>Windows creates an opaque framebuffer and uses constant window opacity when the host
+ * composites Minecraft; the fallback enables framebuffer transparency separately. macOS
+ * creates a transparent framebuffer. While overlay mode is off, the window renders normally.
  */
 public final class Overlay {
 	private Overlay() {
@@ -40,7 +39,6 @@ public final class Overlay {
 	private static int appliedX = Integer.MIN_VALUE, appliedY, appliedW, appliedH;
 	private static long lastInWorldMs;
 	private static boolean busy;
-	private static boolean nativeWindowHidden;
 	/** Dev ("spin" command): turn the player this fast, every frame, to check that both games show the same pose. */
 	public static float spinDegPerSec;
 	private static long lastSpinNs;
@@ -53,6 +51,22 @@ public final class Overlay {
 
 	public static boolean transparentWindow() {
 		return transparentWindow;
+	}
+
+	/** Windows overlays need a windowed swap chain; they follow the host's size themselves. */
+	public static boolean windowedModeRequired() {
+		return Platform.get() == Platform.WINDOWS && !Boolean.getBoolean("erbridge.disableOverlay");
+	}
+
+	/** A zero-alpha input window lets Windows deliver clicks to Elden Ring underneath it. */
+	public static float windowBackgroundAlpha() {
+		if (!active) {
+			return 1.0F;
+		}
+		if (Platform.get() == Platform.WINDOWS) {
+			return WindowsOverlay.inputOnly() ? 1.0F : 1.0F / 255.0F;
+		}
+		return 0.0F;
 	}
 
 	public static boolean hostMode() {
@@ -73,6 +87,7 @@ public final class Overlay {
 			return;
 		}
 		hostMode = true;
+		CameraSync.suspend();
 		if (mc.level != null && mc.screen == null) {
 			mc.pauseGame(false);
 		}
@@ -101,7 +116,10 @@ public final class Overlay {
 		if (Boolean.getBoolean("erbridge.disableOverlay")) {
 			return;
 		}
-		GLFW.glfwWindowHint(GLFW.GLFW_TRANSPARENT_FRAMEBUFFER, GLFW.GLFW_TRUE);
+		// Windows uses an opaque input framebuffer with constant window opacity when
+		// Elden Ring composites our frames. Per-pixel alpha is enabled only for fallback.
+		GLFW.glfwWindowHint(GLFW.GLFW_TRANSPARENT_FRAMEBUFFER,
+				Platform.get() == Platform.WINDOWS ? GLFW.GLFW_FALSE : GLFW.GLFW_TRUE);
 		transparentWindow = true;
 		if (Platform.get() == Platform.MACOSX) {
 			// Match the host game's pixel density (CrossOver renders it at 1x) and save 4x fill
@@ -131,14 +149,15 @@ public final class Overlay {
 		} else {
 			lastSpinNs = 0L;
 		}
-		if (Platform.get() == Platform.WINDOWS && window != 0L) {
-            boolean hide = active && !hostMode && FramePassthrough.activeInHost();
-            if (hide != nativeWindowHidden) {
-                GLFW.glfwSetWindowOpacity(window, hide ? 0.01F : 1.0F);
-                nativeWindowHidden = hide;
-            }
-        }
-        ErLink link = ErLink.get();
+		// Recover even if options.txt or a fullscreen mod requested fullscreen at startup.
+		// Whole-window opacity must not be combined with our transparent framebuffer.
+		if (windowedModeRequired() && mc.getWindow().isFullscreen()) {
+			mc.getWindow().toggleFullScreen();
+			mc.options.fullscreen().set(false);
+			appliedX = Integer.MIN_VALUE;
+			LOG.info("Keeping the Minecraft input window in windowed mode");
+		}
+		ErLink link = ErLink.get();
 		boolean alive = link.poll();
 		link.bumpMcHeartbeat();
 		int req = link.mcSwitchRequests();
@@ -159,13 +178,8 @@ public final class Overlay {
 		// window doesn't jump back and forth; only a longer absence (title screen) hands it back.
 		boolean hostBusyNow = haveState && STATE.has(Protocol.STATE_HOST_BUSY);
 		boolean inWorld = haveState && (now - lastInWorldMs < 3000 || hostBusyNow);
-		// On Windows Borderless Fullscreen can keep a GLFW monitor attached while
-		// changing the Win32 window styles. Its borderless modes disable auto-iconify.
-		boolean modBorderless = window != 0L && Platform.get() == Platform.WINDOWS
-				&& FabricLoader.getInstance().isModLoaded("fullscreenfix")
-				&& GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_AUTO_ICONIFY) == GLFW.GLFW_FALSE;
 		boolean want = transparentWindow && window != 0L && inWorld && !hostMode
-				&& (GLFW.glfwGetWindowMonitor(window) == 0L || modBorderless);
+				&& GLFW.glfwGetWindowMonitor(window) == 0L;
 		if (want) {
 			lastWantMs = now;
 		}
@@ -188,6 +202,12 @@ public final class Overlay {
 			busy = nowBusy;
 			LOG.info(busy ? "Elden Ring shows its own screen (death, loading or recall): drawing nothing"
 				: "Drawing again");
+		}
+		if (!active || busy) {
+			CameraSync.suspend();
+		}
+		if (Platform.get() == Platform.WINDOWS && window != 0L) {
+			WindowsOverlay.update(window, active && !hostMode, busy || FramePassthrough.activeInHost());
 		}
 	}
 
@@ -212,6 +232,7 @@ public final class Overlay {
 			// When the host game draws our frames, this window is fully transparent; macOS would
 			// then let clicks fall through to it unless told otherwise.
 			objcBool("setIgnoresMouseEvents:", false);
+			GLFW.glfwFocusWindow(window);
 			appliedX = Integer.MIN_VALUE;
 		} else if (!hostMode) {
 			GLFW.glfwSetWindowAttrib(window, GLFW.GLFW_FLOATING, GLFW.GLFW_FALSE);
@@ -231,6 +252,12 @@ public final class Overlay {
 	private static void follow(int x, int y, int w, int h) {
 		if (w < 64 || h < 64) {
 			return;
+		}
+		// Windows OpenGL drivers can bypass desktop composition for a borderless
+		// surface that exactly covers a monitor, displaying our empty input buffer black.
+		// Leave one screen pixel at the bottom so the window remains desktop-composited.
+		if (Platform.get() == Platform.WINDOWS) {
+			h--;
 		}
 		if (x == appliedX && y == appliedY && w == appliedW && h == appliedH) {
 			return;

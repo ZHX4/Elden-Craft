@@ -140,7 +140,7 @@ public final class FramePassthrough {
 
 	/** Whether frames are being captured (then CameraSync leaves pose publishing to us). */
 	public static boolean wanted() {
-		return enabled && !failed && Overlay.active() && CameraSync.mode() == CameraSync.Mode.DRIVE_HOST && CameraSync.driving()
+		return enabled && !failed && Overlay.active() && !Overlay.hostMode() && CameraSync.mode() == CameraSync.Mode.DRIVE_HOST && CameraSync.driving()
 			&& fits(Minecraft.getInstance().getMainRenderTarget());
 	}
 
@@ -338,7 +338,16 @@ public final class FramePassthrough {
 				PENDING[set] = false;
 			}
 		}
-		if (newestReady >= 0 && wanted()) publish(newestReady);
+		if (newestReady >= 0) {
+			if (wanted()) {
+				publish(newestReady);
+			} else if (GPU_FRAME[newestReady]) {
+				// No presentation header was sent, so the host cannot acknowledge this
+				// texture. The GL fence is complete: release it here, including the
+				// newest pending frame discarded by F8 or a zone change.
+				GpuTransport.discard(newestReady);
+			}
+		}
 	}
 
 	private static void publish(int set) {

@@ -950,6 +950,17 @@ static void composite(IDXGISwapChain* sc, UINT flags) {
     ErmcControl ctrl;
     memset(&ctrl, 0, sizeof(ctrl));
     bool mc = control_snapshot(&ctrl) && (ctrl.flags & ERMC_CTRL_COMPOSITE) && frames_open();
+    // F8 stops drawing Minecraft, but its last copies still need their GPU
+    // completion acknowledgements. Retire unselected publications too; neither
+    // side should need a new Minecraft frame to release the old capture ring.
+    gpu_acknowledge(g_lastUploaded, !mc);
+    if (!mc) {
+        g_haveFrame = false;
+        if (g_frames) {
+            uint64_t retired = (uint64_t)InterlockedCompareExchange64((volatile LONG64*)(g_frames+0x10),0,0);
+            if (retired > g_lastUploaded) g_lastUploaded = retired;
+        }
+    }
     if (!test && !mc) return;
 
     // Pipeline objects are made the first time something is to be drawn.
@@ -980,7 +991,6 @@ static void composite(IDXGISwapChain* sc, UINT flags) {
     }
 
     RingSlot& r = g_ring[g_ringPos % kRing];
-    gpu_acknowledge(g_lastUploaded);
     double waitStart = perf_ms();
     if (!wait_fence(r.fence, 50)) return;  // GPU far behind: skip rather than overwrite in-use memory
     g_perfWait += perf_ms() - waitStart;

@@ -20,6 +20,7 @@
 // Site of Grace is the respawn for both: Minecraft draws nothing while the Tarnished is dead
 // or loading, and moves its player to the Tarnished once it is usable again (hostLife).
 #include "common.h"
+#include "player_facing.h"
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -491,6 +492,16 @@ static void kill_player(const Player& p) {
 
 static bool raycast(const float* s, const float* e, uint32_t filter, void* ignore, ErmcRayHit* out);
 
+// Independent of the large terrain mailbox: a lift must carry its passenger at
+// game-frame frequency, even while Minecraft is refining distant walls.
+static bool g_supportValid = false;
+static uint32_t g_supportEpoch = 0;
+static float g_supportTravelY = 0;
+static float g_supportPos[3] = {};
+static float g_supportRayFloor = 0;
+static uint64_t g_supportAtMs = 0;
+static void update_support(const ErmcControl& c, bool active, void* ignore);
+
 constexpr float kReachMax = 2.0f;          // look this far ahead (m, horizontal, from the chest)
 constexpr float kReachGap = 0.45f;         // stop this far short of the surface (capsule + margin)
 constexpr float kReachChest = 1.0f;        // ray height above the feet
@@ -687,7 +698,7 @@ static bool reach_assist(float* put, float yawDeg, uint32_t block, void* ignore,
                 if (!k.hit && g.hit) {
                     for (int i = 0; i < 3; i++) g_reachOffset[i] = dst[i] - put[i];
                     memcpy(put, dst, 12);
-                    *faceTheta = atan2f(-side * nx, -side * nz);
+                    *faceTheta = player_yaw_from_forward(-side * nx, -side * nz);
                     squared = true;
                 }
             }
@@ -837,6 +848,8 @@ static void stand_in(const Player& p, const ErmcControl* c, bool active) {
     p.data[kDataFlags] |= 1u;                            // NoDead
 
     float put[3] = {c->hunterPos[0], c->hunterPos[1], c->hunterPos[2]};
+    if (g_supportValid && (c->flags & ERMC_CTRL_GROUNDED) && c->supportEpoch == g_supportEpoch)
+        put[1] += g_supportTravelY - c->supportTravelY;
     float faceTheta = 0;
     bool squared = reach_assist(put, c->hunterYawDeg, *(uint32_t*)(p.ins + kPlayerBlockId), p.ins, &faceTheta);
     float h[4];
@@ -849,10 +862,8 @@ static void stand_in(const Player& p, const ErmcControl* c, bool active) {
     memcpy(g_putHavok, h, 12);
     g_putHavokValid = true;
     g_havePut = true;
-    // Minecraft yaw (0 = +Z south, clockwise) -> Elden Ring yaw about +Y, with Minecraft's
-    // Z flipped (Elden Ring is left-handed): forward_er = (-sin y, 0, -cos y).
-    float y = c->hunterYawDeg * 3.14159265f / 180.0f;
-    float theta = squared ? faceTheta : atan2f(-sinf(y), -cosf(y));
+    // Match the player's heading, including the reach-assisted facing toward a door.
+    float theta = squared ? faceTheta : player_yaw_from_minecraft(c->hunterYawDeg);
     float q[4] = {0.0f, sinf(theta * 0.5f), 0.0f, cosf(theta * 0.5f)};
     memcpy(p.phys + kPhysQuat, q, 16);
     memcpy(p.phys + kPhysQuatInterp, q, 16);
@@ -1763,6 +1774,7 @@ typedef bool(__fastcall* CastRay_t)(void* world, uint32_t filter, const float* o
                                     float* hit, void* ignore);
 
 static bool raycast(const float* s, const float* e, uint32_t filter, void* ignore, ErmcRayHit* out) {
+    CrashPhase phase("physics raycast");
     memset(out, 0, sizeof(*out));
     uint8_t* havok = global_ptr(rva::kCSHavokMan, 0);
     if (!havok || !mem_readable(havok + kHavokPhysWorld, 8)) return false;
@@ -1787,6 +1799,180 @@ static bool raycast(const float* s, const float* e, uint32_t filter, void* ignor
         }
     }
     return r;
+}
+
+static void update_support(const ErmcControl& c, bool active, void* ignore) {
+    uint64_t now = now_ms();
+    if (!g_supportEpoch) g_supportEpoch = GetTickCount() | 1u;
+    bool grounded = (c.flags & ERMC_CTRL_GROUNDED) != 0;
+    bool valid = active && !(c.flags & ERMC_CTRL_FLYING);
+    const char* lost = "inactive or flying";
+    float travel = g_supportTravelY;
+    float trackedFloor = g_supportRayFloor;
+    uint64_t elapsed = now - g_supportAtMs;
+    if (valid && g_supportValid) {
+        // Recheck the PREVIOUS point. Walking along static stairs or a slope
+        // changes the floor under the new feet, but is not platform movement.
+        ErmcRayHit hit;
+        // The lift accelerates past the old 8 m/s limit. Cover its travel
+        // during this game tick, including a brief delayed frame.
+        float range = .1f + 24.0f * (float)(elapsed < 250 ? elapsed : 250) / 1000.0f;
+        float s[3] = {g_supportPos[0], g_supportRayFloor + range, g_supportPos[2]};
+        float e[3] = {s[0], g_supportRayFloor - range, s[2]};
+        valid = raycast(s, e, kTerrainRayFilter, ignore, &hit) && hit.hit;
+        lost = "previous floor ray";
+        if (valid) {
+            float dy = hit.pos[1] - g_supportRayFloor;
+            valid = elapsed <= 250 && fabsf(dy) <= .05f + 24.0f * elapsed / 1000.0f;
+            lost = "travel discontinuity";
+            if (valid) { travel += dy; trackedFloor = hit.pos[1]; }
+        }
+    }
+    float feetY = c.hunterPos[1];
+    // Even an airborne render pose acknowledges a particular floor sample.
+    // Compare feet and floor at that same time: brief onGround=false states
+    // and jumps must not lose the platform merely because it has moved since.
+    // This adjustment only validates contact; stand_in still carries grounded
+    // passengers only, so airborne movement keeps Minecraft's jump physics.
+    if (g_supportValid && c.supportEpoch == g_supportEpoch) feetY += travel - c.supportTravelY;
+    // A jump detaches the passenger, not the floor. Keep sampling the moving
+    // surface at its tracked height so Minecraft can land on its NEW position.
+    float probeY = g_supportValid ? trackedFloor : feetY;
+    float floor = 0;
+    float centreFloor = 0, lowFloor = 0;
+    int supportedCorners = 0;
+    const float corners[5][2] = {{0,0},{-.3f,-.3f},{-.3f,.3f},{.3f,-.3f},{.3f,.3f}};
+    for (int i = 0; valid && i < 5; i++) {
+        ErmcRayHit hit;
+        float s[3] = {c.hunterPos[0] + corners[i][0], probeY + .5f, c.hunterPos[2] + corners[i][1]};
+        float e[3] = {s[0], probeY - .5f, s[2]};
+        bool present = raycast(s, e, kTerrainRayFilter, ignore, &hit) && hit.hit;
+        if (i == 0) {
+            valid = present; lost = "centre floor ray";
+            if (present) centreFloor = lowFloor = floor = hit.pos[1];
+        } else if (present && fabsf(hit.pos[1] - centreFloor) <= .35f) {
+            // Minecraft can stand on partial overlap at a platform edge. A
+            // missing corner or a raised railing is not loss of the centre floor.
+            ++supportedCorners;
+            floor = fmaxf(floor, hit.pos[1]); lowFloor = fminf(lowFloor, hit.pos[1]);
+        }
+    }
+    if (valid) { valid = supportedCorners > 0 && floor - lowFloor <= .35f; lost = "uneven footprint"; }
+    if (valid) { valid = feetY - floor >= -.45f && feetY - floor <= (grounded ? .4f : 4.0f); lost = "feet gap"; }
+    if (!valid) {
+        if (g_supportValid) {
+            log("support: lost %s; floor %.3f -> %.3f, feet %.3f (raw %.3f), travel %.3f -> %.3f, ack %u/%.3f, epoch %u, dt %llu, grounded %d",
+                lost, g_supportPos[1], trackedFloor, feetY, c.hunterPos[1], g_supportTravelY, travel,
+                c.supportEpoch, c.supportTravelY, g_supportEpoch, (unsigned long long)elapsed, grounded ? 1 : 0);
+            ++g_supportEpoch;
+        }
+        g_supportValid = false;
+        g_supportTravelY = 0;
+        return;
+    }
+    if (!g_supportValid) { ++g_supportEpoch; travel = 0; }
+    g_supportTravelY = travel;
+    // Track the same centre ray separately from the highest corner. Otherwise
+    // a sloping wheel platform's corner offset becomes false travel each frame.
+    g_supportRayFloor = centreFloor;
+    g_supportPos[0] = c.hunterPos[0]; g_supportPos[1] = floor; g_supportPos[2] = c.hunterPos[2];
+    g_supportAtMs = now;
+    g_supportValid = true;
+}
+
+// Boarding needs collision before there is a passenger. This small independent
+// mailbox tracks half-metre cells near Steve, rather than waiting for the large
+// terrain batch. Only cells observed moving at the SAME world point qualify.
+struct PlatformHistory {
+    int x, z;
+    bool used, hit;
+    float floor, top, low, high;
+    uint64_t at, moved;
+};
+static PlatformHistory g_platformHistory[4096];
+static uint32_t g_platformZone = 0xFFFFFFFFu;
+static uint64_t g_platformAt = 0;
+
+static bool platform_clear(float x, float z, float low, float high, void* ignore) {
+    const float offsets[5][2] = {{0,0},{-.3125f,-.3125f},{-.3125f,.3125f},{.3125f,-.3125f},{.3125f,.3125f}};
+    ErmcRayHit hit;
+    for (int i = 0; i < 5; i++) {
+        float s[3] = {x + offsets[i][0], low, z + offsets[i][1]};
+        float e[3] = {s[0], high, s[2]};
+        if (raycast(s, e, kTerrainRayFilter, ignore, &hit) && hit.hit) return false;
+    }
+    for (int y = 0; y < 3; y++) for (int d = 0; d < 2; d++) {
+        float h = low + (high - low) * y / 2;
+        float s[3] = {x - .3125f, h, z + (d ? .3125f : -.3125f)};
+        float e[3] = {x + .3125f, h, z + (d ? -.3125f : .3125f)};
+        if (raycast(s, e, kTerrainRayFilter, ignore, &hit) && hit.hit) return false;
+        if (raycast(e, s, kTerrainRayFilter, ignore, &hit) && hit.hit) return false;
+    }
+    return true;
+}
+
+static void update_platform_cells(const ErmcControl& c, bool active, uint32_t zone, void* ignore) {
+    uint64_t now = now_ms();
+    if (active && now - g_platformAt < 40) return;
+    g_platformAt = now;
+    if (!active || zone != g_platformZone) {
+        memset(g_platformHistory, 0, sizeof(g_platformHistory));
+        g_platformZone = zone;
+    }
+    ErmcPlatformTable next = {};
+    next.zone = zone;
+    int gx = (int)floorf(c.hunterPos[0] * 2), gz = (int)floorf(c.hunterPos[2] * 2);
+    for (int dz = -6; active && dz <= 6; dz++) for (int dx = -6; dx <= 6; dx++) {
+        int ix = gx + dx, iz = gz + dz;
+        unsigned slot = ((uint32_t)ix * 73856093u ^ (uint32_t)iz * 19349663u) & 4095;
+        PlatformHistory& old = g_platformHistory[slot];
+        if (!old.used || old.x != ix || old.z != iz) {
+            old = {}; old.used = true; old.x = ix; old.z = iz;
+        }
+        float x = (ix + .5f) * .5f, z = (iz + .5f) * .5f;
+        float high = c.hunterPos[1] + 4, low = c.hunterPos[1] - 6;
+        ErmcRayHit hit;
+        float s[3] = {x, high, z}, e[3] = {x, low, z};
+        bool present = raycast(s, e, kTerrainRayFilter, ignore, &hit) && hit.hit;
+        float floor = present ? hit.pos[1] : old.floor;
+        uint64_t elapsed = now - old.at;
+        if (old.at && elapsed <= 250 && old.hit && present
+            && fabsf(floor - old.floor) > .008f && fabsf(floor - old.floor) <= .05f + 24 * elapsed / 1000.0f)
+            old.moved = now;
+        // Missing evidence is never permission to carve walls. A disappearing
+        // floor is removed only after the old surface volume is checked empty.
+        bool moving = old.moved && now - old.moved < 1500;
+        float previousTop = old.top, top = floor, bottom = floor;
+        bool footprint = present;
+        const float corners[4][2] = {{-.3125f,-.3125f},{-.3125f,.3125f},{.3125f,-.3125f},{.3125f,.3125f}};
+        if (moving) for (int i = 0; footprint && i < 4; i++) {
+            float a[3] = {x + corners[i][0], floor + .5f, z + corners[i][1]};
+            float b[3] = {a[0], floor - .5f, a[2]};
+            footprint = raycast(a, b, kTerrainRayFilter, ignore, &hit) && hit.hit;
+            if (footprint) { top = fmaxf(top, hit.pos[1]); bottom = fminf(bottom, hit.pos[1]); }
+        }
+        if (moving && footprint && top - bottom <= .35f && platform_clear(x, z, top + .04f, top + 2.1f, ignore)) {
+            auto& cell = next.cells[next.count++];
+            cell.x = x; cell.z = z; cell.floor = top; cell.previousFloor = previousTop;
+            cell.clearLow = top - .07f;
+            cell.clearHigh = top + 2.05f; cell.flags = 1;
+            if (fabsf(previousTop - top) > .008f && platform_clear(x, z, previousTop - .08f, previousTop + .08f, ignore)) cell.flags |= 2;
+            old.top = top;
+        } else if (moving && !present && old.floor > low && old.floor < high
+            && platform_clear(x, z, previousTop - .08f, previousTop + .08f, ignore)) {
+            auto& cell = next.cells[next.count++];
+            cell.x = x; cell.z = z; cell.floor = previousTop; cell.previousFloor = previousTop;
+            cell.clearLow = previousTop - .08f; cell.clearHigh = previousTop + .08f;
+        }
+        if (!moving) old.top = floor;
+        old.hit = present; old.floor = floor; old.low = low; old.high = high; old.at = now;
+    }
+    ErmcPlatformTable* out = shm_platforms();
+    out->seq = (out->seq + 1) | 1u;
+    __asm__ __volatile__("" ::: "memory");
+    memcpy((uint8_t*)out + 4, (uint8_t*)&next + 4, sizeof(next) - 4);
+    __asm__ __volatile__("" ::: "memory");
+    out->seq++;
 }
 
 static volatile LONG g_dbgRayState = 0;  // 0 idle, 1 requested, 2 done
@@ -1860,8 +2046,10 @@ static void handle_switching() {
     HWND hwnd = game_hwnd();
     if (!hwnd) return;
     bool focused = GetForegroundWindow() == hwnd;
-    bool down = focused && (GetAsyncKeyState(VK_F8) & 0x8000);
-    if (down && !g_f8Down) {
+    // Track the physical key even while Minecraft has focus. Holding its F8
+    // through the handoff must not count as a second press in Elden Ring.
+    bool down = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
+    if (focused && down && !g_f8Down) {
         ErmcHeader* h = shm_header();
         h->mcSwitchReq = h->mcSwitchReq + 1;
         log("switch: F8 in Elden Ring -> back to Minecraft");
@@ -1891,6 +2079,7 @@ static DWORD g_tickThread = 0, g_camThread = 0;
 
 static void __fastcall task_tick(void* /*self*/, const void* /*data*/) {
     InflightGuard guard;
+    CrashPhase phase("game tick");
     if (!g_tickThread) {
         g_tickThread = GetCurrentThreadId();
         log("game: tick task runs on thread %lu", g_tickThread);
@@ -1914,6 +2103,8 @@ static void __fastcall task_tick(void* /*self*/, const void* /*data*/) {
     memset(&c, 0, sizeof(c));
     bool ctrl = control_active(&c);
     bool alive = havePlayer && g_life == LIFE_ALIVE;
+    update_support(c, alive && ctrl && (c.flags & ERMC_CTRL_MOVE_HUNTER), havePlayer ? p.ins : nullptr);
+    update_platform_cells(c, alive && ctrl && (c.flags & ERMC_CTRL_MOVE_HUNTER), g_frame.zone, havePlayer ? p.ins : nullptr);
     if (havePlayer) stand_in(p, &c, alive && ctrl && (c.flags & ERMC_CTRL_MOVE_HUNTER));
     update_passages(havePlayer && alive && g_standing, havePlayer ? p.ins : nullptr);
     if (alive) {
@@ -2073,6 +2264,12 @@ void game_fill_state(ErmcGameState* st) {
     else if (g_life != LIFE_ALIVE && g_lastAliveMs && now - g_lastAliveMs < 60000) st->flags |= ERMC_STATE_HOST_BUSY;
     if (!g_frame.valid || g_life != LIFE_ALIVE) return;
     st->stageId = g_frame.zone;
+    st->supportEpoch = g_supportEpoch;
+    if (g_supportValid) {
+        st->flags |= ERMC_STATE_SUPPORT_VALID;
+        st->supportTravelY = g_supportTravelY;
+        memcpy(st->supportPos, g_supportPos, 12);
+    }
     uint8_t* cam = final_camera();
     if (cam) {
         const float* m = (const float*)(cam + kCamMatrix);

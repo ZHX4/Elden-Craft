@@ -38,11 +38,11 @@ public abstract class RenderTargetMixin {
 			return;
 		}
 		GlStateManager._colorMask(true, true, true, true);
-		GlStateManager._clearColor(0.0F, 0.0F, 0.0F, Overlay.active() ? 0.0F : 1.0F);
+		GlStateManager._clearColor(0.0F, 0.0F, 0.0F, Overlay.windowBackgroundAlpha());
 		GlStateManager._clear(GL_COLOR_BUFFER_BIT, Minecraft.ON_OSX);
 		if (FramePassthrough.activeInHost() || (Overlay.active() && Overlay.hostBusy())) {
 			// The host game is showing this frame inside its own, or its own death/loading screen:
-			// our window stays transparent and only keeps the input focus.
+			// Windows keeps an opaque input framebuffer and hides it with nonzero window opacity.
 			ci.cancel();
 		}
 	}

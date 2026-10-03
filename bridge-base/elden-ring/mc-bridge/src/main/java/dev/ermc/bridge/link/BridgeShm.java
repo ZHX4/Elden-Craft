@@ -155,6 +155,8 @@ public final class BridgeShm {
 		buf.putInt(base + Protocol.C_POSE_LAG, c.poseLag);
 		buf.putInt(base + Protocol.C_DEPTH_INDEX, c.depthIndex);
 		buf.putFloat(base + Protocol.C_HUNTER_YAW, c.hunterYawDeg);
+		buf.putInt(base + Protocol.C_SUPPORT_EPOCH, c.supportEpoch);
+		buf.putFloat(base + Protocol.C_SUPPORT_TRAVEL_Y, c.supportTravelY);
 		INT.setRelease(buf, base + Protocol.C_SEQ, s + 2);
 	}
 
@@ -172,6 +174,10 @@ public final class BridgeShm {
 	 */
 	public int submitRays(float[] rays, int count, int flags, int[] filter) {
 		int base = Protocol.OFF_RAYS;
+		// A reset or zone transition can abandon a Java request while the game still
+		// processes it. Never overwrite its rays or reuse its partially written hits.
+		if ((int) INT.getAcquire(buf, base + Protocol.R_REQ_SEQ)
+			!= (int) INT.getAcquire(buf, base + Protocol.R_RESP_SEQ)) return -1;
 		if (filter != null) {
 			buf.putInt(base + Protocol.R_FILTER_A, filter[0]);
 			buf.putInt(base + Protocol.R_FILTER_B, filter[1]);
@@ -290,6 +296,26 @@ public final class BridgeShm {
 			if ((int) INT.getAcquire(buf, base + Protocol.P_SEQ) == s1) {
 				return count;
 			}
+		}
+		return -1;
+	}
+
+	/** Verified nearby moving cells: x,z,floor,previousFloor,clearLow,clearHigh,flags. */
+	public int readPlatforms(float[] out, int[] metadata) {
+		int base = Protocol.OFF_PLATFORMS;
+		for (int tries = 0; tries < 64; tries++) {
+			int seq = (int) INT.getAcquire(buf, base);
+			if (seq == 0 || (seq & 1) != 0) continue;
+			int count = Math.min(Math.max(buf.getInt(base + 4), 0), Math.min(Protocol.MAX_PLATFORM_CELLS, out.length / Protocol.PLATFORM_FLOATS));
+			metadata[0] = buf.getInt(base + 8);
+			metadata[1] = seq;
+			for (int i = 0; i < count; i++) {
+				int e = base + 16 + i * Protocol.PLATFORM_CELL_SIZE;
+				for (int k = 0; k < 6; k++) out[i * Protocol.PLATFORM_FLOATS + k] = buf.getFloat(e + k * 4);
+				out[i * Protocol.PLATFORM_FLOATS + 6] = buf.getInt(e + 24);
+			}
+			VarHandle.acquireFence();
+			if ((int) INT.getAcquire(buf, base) == seq) return count;
 		}
 		return -1;
 	}

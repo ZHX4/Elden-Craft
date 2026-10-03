@@ -47,6 +47,7 @@ public class ErBridgeClient implements ClientModInitializer {
 		passthroughKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.erbridge.passthrough",
 			InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F6, "category.erbridge"));
 
+		ClientTickEvents.START_CLIENT_TICK.register(MovingPlatformClient::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
 			while (cameraModeKey.consumeClick()) {
 				CameraSync.toggleMode();

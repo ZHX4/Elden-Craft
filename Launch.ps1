@@ -56,7 +56,19 @@ if ($State -and $State.MinecraftProcessId -gt 0) {
         }
     }
 }
-Write-Output 'Starting Minecraft... The runClient task stays active while you play.'
+$MinecraftRun = Join-Path $ProjectRoot 'bridge-base\elden-ring\mc-bridge\run'
+function Set-MinecraftSetting([string]$Path, [string]$Name, [string]$Value) {
+    $Lines = @()
+    if (Test-Path -LiteralPath $Path) {
+        $Lines = @(Get-Content -LiteralPath $Path -Encoding UTF8 | Where-Object { !$_.StartsWith($Name + ':') })
+    }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
+    [IO.File]::WriteAllLines($Path, [string[]]($Lines + ($Name + ':' + $Value)), [Text.UTF8Encoding]::new($false))
+}
+# Minecraft owns the input window; the bridge supplies its borderless overlay layout.
+Set-MinecraftSetting (Join-Path $MinecraftRun 'options.txt') 'fullscreen' 'false'
+Set-MinecraftSetting (Join-Path $MinecraftRun 'config\fullscreenfix.properties') 'startInFullscreen' 'false'
+Write-Output 'Starting Minecraft in windowed mode... The runClient task stays active while you play.'
 $Gradle = (Get-ChildItem "$ProjectRoot\.tools\gradle" -Directory | Select-Object -First 1).FullName + '\bin\gradle.bat'
 & $Gradle '-p' "$ProjectRoot\bridge-base\elden-ring\mc-bridge" '--no-daemon' '--no-configuration-cache' 'remapJar' 'runClient'
 if ($LASTEXITCODE -ne 0) { throw 'Minecraft launch failed; see the console and run/logs/latest.log.' }

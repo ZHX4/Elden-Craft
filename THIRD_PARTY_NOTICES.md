@@ -16,9 +16,10 @@ The Gradle wrapper is build infrastructure distributed under the
 Minecraft, Fabric Loader, Fabric API and other downloaded dependencies retain
 their respective licenses.
 
-The local setup uses [Borderless Fullscreen](https://modrinth.com/mod/borderless-fullscreen)
-2.4.1 and b100lib 0.2.2 for Minecraft 1.21.1. Their JARs and local reference
-checkouts are excluded; obtain them from their authors.
+The Windows overlay is managed by the bridge itself. Borderless Fullscreen and
+b100lib, used in an earlier local setup, are no longer required or bundled.
+Downloaded LLVM-MinGW, JDK and Gradle toolchains are excluded from this repository
+and retain their own licenses.
 
 [SkyCraft](https://github.com/chasmlol/SkyCraft) and
 [ArkWeb](https://github.com/luki-1/ArkWeb) were studied as architectural references.

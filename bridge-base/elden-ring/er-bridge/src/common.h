@@ -12,6 +12,16 @@ void log(const char* fmt, ...) __attribute__((format(gnu_printf, 1, 2)));
 void log_close();
 uint64_t now_ms();
 
+// crash.cpp: observes faults without swallowing them or resuming a damaged game.
+void crash_init();
+void crash_shutdown();
+const char* crash_phase(const char* phase);
+struct CrashPhase {
+    const char* previous;
+    explicit CrashPhase(const char* phase) : previous(crash_phase(phase)) {}
+    ~CrashPhase() { crash_phase(previous); }
+};
+
 // shm.cpp
 bool shm_open();
 void shm_close();
@@ -23,6 +33,7 @@ uint8_t* shm_cmd_resp();
 ErmcRayHeader* shm_rays();
 ErmcEntityTable* shm_entities();
 ErmcPassageTable* shm_passages();
+ErmcPlatformTable* shm_platforms();
 ErmcHunterEvents* shm_hunter();
 ErmcDamageQueue* shm_damage();
 

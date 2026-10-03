@@ -16,6 +16,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.PushReaction;
 
@@ -36,6 +38,18 @@ public class ErBridgeMod implements ModInitializer {
 			.isSuffocating((state, level, pos) -> false)
 			.isViewBlocking((state, level, pos) -> false))
 	);
+	public static final TerrainShapeBlock TERRAIN_DETAIL = Registry.register(
+		BuiltInRegistries.BLOCK, ResourceLocation.fromNamespaceAndPath(MOD_ID, "terrain_detail"),
+		new TerrainShapeBlock(BlockBehaviour.Properties.ofFullCopy(TERRAIN).dynamicShape())
+	);
+	public static final BlockEntityType<TerrainShapeBlockEntity> TERRAIN_DETAIL_ENTITY = Registry.register(
+		BuiltInRegistries.BLOCK_ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath(MOD_ID, "terrain_detail"),
+		BlockEntityType.Builder.of(TerrainShapeBlockEntity::new, TERRAIN_DETAIL).build(null)
+	);
+
+	public static boolean isTerrain(BlockState state) {
+		return state.is(TERRAIN) || state.is(TERRAIN_DETAIL);
+	}
 
 	@Override
 	public void onInitialize() {
@@ -56,12 +70,12 @@ public class ErBridgeMod implements ModInitializer {
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> TerrainManager.onJoin(server, handler.player));
 
 		// The host game's ground is not breakable, even in creative mode.
-		PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) -> !state.is(TERRAIN));
+		PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) -> !isTerrain(state));
 		// Punching Elden Ring's ground or props strikes that point in Elden Ring (breaks crates,
 		// pots...); the terrain there is sampled again once the object is gone. Client side: the
 		// callback's FAIL there keeps the attack from reaching the server at all.
 		AttackBlockCallback.EVENT.register((player, level, hand, pos, direction) -> {
-			if (!level.getBlockState(pos).is(TERRAIN)) {
+			if (!isTerrain(level.getBlockState(pos))) {
 				return InteractionResult.PASS;
 			}
 			if (level.isClientSide()) {

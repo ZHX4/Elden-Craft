@@ -107,6 +107,8 @@ public final class CameraSync {
 		System.arraycopy(CONTROL.camUp, 0, out.camUp, 0, 3);
 		System.arraycopy(CONTROL.hunterPos, 0, out.hunterPos, 0, 3);
 		out.hunterYawDeg = CONTROL.hunterYawDeg;
+		out.supportEpoch = CONTROL.supportEpoch;
+		out.supportTravelY = CONTROL.supportTravelY;
 	}
 
 	public static void afterCameraSetup(Camera camera) {
@@ -152,6 +154,9 @@ public final class CameraSync {
 			| (standIn && mc.player != null ? Protocol.CTRL_MOVE_HUNTER | Protocol.CTRL_HIDE_HUNTER : 0)
 			| (passthrough ? Protocol.CTRL_COMPOSITE : 0) | (noDepthTest ? Protocol.CTRL_NO_DEPTH_TEST : 0)
 			| (debugDepth ? Protocol.CTRL_DEBUG_DEPTH : 0);
+		if (mc.player != null && mc.player.onGround() && !mc.player.getAbilities().flying)
+			CONTROL.flags |= Protocol.CTRL_GROUNDED;
+		if (mc.player != null && mc.player.getAbilities().flying) CONTROL.flags |= Protocol.CTRL_FLYING;
 		CONTROL.poseLag = poseLag;
 		CONTROL.depthIndex = depthIndex;
 		CONTROL.mcFrame++;
@@ -163,6 +168,7 @@ public final class CameraSync {
 		CONTROL.fovYDeg = fov;
 		if (mc.player != null) {
 			float pt = camera.getPartialTickTime();
+			MovingPlatformClient.copyControl(CONTROL, pt);
 			double[] feet = map.toHost(net.minecraft.util.Mth.lerp(pt, mc.player.xo, mc.player.getX()),
 				net.minecraft.util.Mth.lerp(pt, mc.player.yo, mc.player.getY()),
 				net.minecraft.util.Mth.lerp(pt, mc.player.zo, mc.player.getZ()));
@@ -176,6 +182,12 @@ public final class CameraSync {
 			ErLink.get().writeControl(CONTROL);
 		}
 		// With passthrough, FramePassthrough sends this pose once the frame's pixels are ready.
+	}
+
+	/** Release control even when a pause screen prevents Camera.setup from running. */
+	public static void suspend() {
+		driving = false;
+		releaseHostCamera();
 	}
 
 	private static void releaseHostCamera() {

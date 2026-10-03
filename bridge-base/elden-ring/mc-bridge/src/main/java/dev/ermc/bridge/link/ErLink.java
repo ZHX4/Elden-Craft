@@ -113,6 +113,10 @@ public final class ErLink {
 		return shm != null && alive() ? shm.readPassages(out, zoneOut) : -1;
 	}
 
+	public synchronized int readPlatforms(float[] out, int[] metadata) {
+		return shm != null && alive() ? shm.readPlatforms(out, metadata) : -1;
+	}
+
 	public synchronized boolean pushDamage(long id, float amount, float x, float y, float z, int flags) {
 		return shm != null && shm.pushDamage(id, amount, x, y, z, flags);
 	}

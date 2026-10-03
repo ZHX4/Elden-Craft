@@ -12,4 +12,6 @@ public final class ControlState {
 	public int poseLag = 1;
 	public int depthIndex;
 	public float hunterYawDeg;
+	public int supportEpoch;
+	public float supportTravelY;
 }

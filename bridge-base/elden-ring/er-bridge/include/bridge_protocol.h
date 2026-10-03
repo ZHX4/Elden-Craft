@@ -1,12 +1,13 @@
-// Shared-memory protocol between er-bridge (Windows DLL inside Elden Ring, running under
-// CrossOver/Wine) and elden-ring/mc-bridge (Fabric mod "erbridge", native macOS JVM).
+// Shared-memory protocol between er-bridge (Windows DLL inside Elden Ring) and
+// elden-ring/mc-bridge (Fabric mod "erbridge"). The Windows launcher sets ERMC_DIR
+// to the project's runtime directory; the original CrossOver transport remains compatible.
 //
 // Same layout as the Monster Hunter: World bridge (monster-hunter-world/mhw-bridge/include/bridge_protocol.h),
-// including the magic value, but in its own directory (/tmp/ermc/), so the two never mix.
+// including the magic value, but in its own directory, so the two never mix.
 // "Hunter" fields refer to the host game's player character (the Tarnished here).
 //
-// Transport: one file-backed mapping. Wine maps file views with MAP_SHARED, so both
-// processes see the same physical pages (verified under CrossOver on Apple Silicon):
+// Transport: one file-backed mapping shared by the native bridge and JVM.
+// Original CrossOver paths (Windows uses ERMC_DIR instead):
 //     macOS : /tmp/ermc/bridge.shm
 //     Wine  : Z:\tmp\ermc\bridge.shm
 //
@@ -34,6 +35,19 @@
 #define ERMC_OFF_ENTITIES 0x200000u  /* ErmcEntityTable, written by ER                */
 #define ERMC_OFF_DAMAGE   0x280000u  /* ErmcDamageQueue, written by Minecraft          */
 #define ERMC_OFF_PASSAGES 0x300000u  /* ErmcPassageTable, written by ER (open doorways)  */
+#define ERMC_OFF_PLATFORMS 0x310000u /* Frame-rate verified moving floor cells near Steve */
+#define ERMC_MAX_PLATFORM_CELLS 169u
+
+typedef struct ErmcPlatformCell {
+    float x, z, floor, previousFloor;
+    float clearLow, clearHigh;
+    uint32_t flags, reserved; /* bit0: floor present; bit1: old floor independently verified empty */
+} ErmcPlatformCell;
+typedef struct ErmcPlatformTable {
+    volatile uint32_t seq;
+    uint32_t count, zone, reserved;
+    ErmcPlatformCell cells[ERMC_MAX_PLATFORM_CELLS];
+} ErmcPlatformTable;
 
 #pragma pack(push, 4)
 
@@ -93,6 +107,7 @@ typedef struct ErmcHeader {
                                              * "YOU DIED" play, Minecraft draws nothing over them */
 #define ERMC_STATE_HOST_BUSY      (1u << 8) /* in a session but no usable Tarnished (death, loading screen, settling
                                              * after one): Minecraft keeps its overlay but draws nothing */
+#define ERMC_STATE_SUPPORT_VALID  (1u << 9) /* tracked flat support, including a passenger's jump above it */
 
 typedef struct ErmcGameState {
     volatile uint32_t seq;        /* 0x00 seqlock */
@@ -113,7 +128,10 @@ typedef struct ErmcGameState {
     uint32_t stageId;             /* 0x7C current zone id (sPlayer+0xAED0: 504 Training Area, 101 Ancient Forest...), 0 if unknown */
     float view[16];               /* 0x80 view matrix as the game stores it (if known) */
     float proj[16];               /* 0xC0 projection matrix as the game stores it */
-} ErmcGameState;                  /* 0x100 */
+    uint32_t supportEpoch;        /* 0x100 changes when support contact is lost or reacquired */
+    float supportTravelY;         /* 0x104 cumulative vertical motion at the same support point */
+    float supportPos[3];          /* 0x108 current floor position, stable frame */
+} ErmcGameState;                  /* 0x114 */
 
 /* ErmcControl.flags */
 #define ERMC_CTRL_OVERRIDE_CAMERA (1u << 0) /* drive the ER camera from camPos/camTarget/fov */
@@ -124,6 +142,8 @@ typedef struct ErmcGameState {
 #define ERMC_CTRL_NO_DEPTH_TEST   (1u << 5) /* debug: composite without occlusion */
 #define ERMC_CTRL_DEBUG_DEPTH     (1u << 6) /* debug: show ER's depth buffer instead */
 #define ERMC_CTRL_NO_RELIGHT      (1u << 7) /* debug: no ER lighting on Minecraft pixels */
+#define ERMC_CTRL_GROUNDED        (1u << 8) /* Minecraft stands on terrain, not flying or jumping */
+#define ERMC_CTRL_FLYING          (1u << 9) /* creative/spectator flight: do not track a platform */
 
 typedef struct ErmcControl {
     volatile uint32_t seq;        /* 0x00 seqlock */
@@ -140,7 +160,9 @@ typedef struct ErmcControl {
     float lightMin;               /* 0x50 */
     float fogStrength;            /* 0x54 0 = default */
     float hunterYawDeg;           /* 0x58 hunter facing (Minecraft yaw, degrees) when MOVE_HUNTER */
-} ErmcControl;                    /* 0x5C */
+    uint32_t supportEpoch;        /* 0x5C support contact used by this pose */
+    float supportTravelY;         /* 0x60 platform travel already included in hunterPos */
+} ErmcControl;                    /* 0x64 */
 
 /* Hits taken by the hunter while it stands in for the Minecraft player (MOVE_HUNTER):
  * monotonic counters, so Minecraft applies the difference since its last read. */
@@ -313,7 +335,7 @@ typedef struct ErmcPassageTable {
  *        + GUI RGBA8 [+ hand RGBA8 when flags bit2], each width*height, rows bottom-up (OpenGL
  *        order), premultiplied alpha. The hand layer (hand, held item, screen effects) is lit
  *        like the world but never occluded.
- * ErmcFramesHeader.version must be ERMC_FRAMES_VERSION (2: room for four layers per slot);
+ * ErmcFramesHeader.version must be ERMC_FRAMES_VERSION (3: shared GPU transport);
  * the DLL ignores other layouts.
  * Minecraft writes a slot, then publishes the frame's pose in ErmcControl (mcFrame = poseId),
  * so by the time ER renders a pose, the matching pixels are already available. */
@@ -352,8 +374,8 @@ typedef struct ErmcFrameHeader {
 
 #ifdef __cplusplus
 static_assert(sizeof(ErmcHeader) == 0xC0, "header size");
-static_assert(sizeof(ErmcGameState) == 0x100, "state size");
-static_assert(sizeof(ErmcControl) == 0x5C, "control size");
+static_assert(sizeof(ErmcGameState) == 0x114, "state size");
+static_assert(sizeof(ErmcControl) == 0x64, "control size");
 static_assert(sizeof(ErmcHunterEvents) == 0x30, "hunter events size");
 static_assert(sizeof(ErmcCmdBlock) == 0x1000, "cmd size");
 static_assert(sizeof(ErmcRayHeader) == 0x20, "ray header size");
@@ -364,5 +386,7 @@ static_assert(sizeof(ErmcFrameHeader) <= ERMC_FRAME_HDR, "frame header size");
 static_assert(ERMC_OFF_ENTITIES + sizeof(ErmcEntityTable) <= ERMC_OFF_DAMAGE, "entity table fits");
 static_assert(ERMC_OFF_DAMAGE + sizeof(ErmcDamageQueue) <= ERMC_OFF_PASSAGES, "damage queue fits");
 static_assert(sizeof(ErmcPassage) == 0x20, "passage size");
-static_assert(ERMC_OFF_PASSAGES + sizeof(ErmcPassageTable) <= ERMC_SHM_SIZE, "passages fit");
+static_assert(ERMC_OFF_PASSAGES + sizeof(ErmcPassageTable) <= ERMC_OFF_PLATFORMS, "passages fit");
+static_assert(sizeof(ErmcPlatformCell) == 32, "platform cell size");
+static_assert(ERMC_OFF_PLATFORMS + sizeof(ErmcPlatformTable) <= ERMC_SHM_SIZE, "platform table fits");
 #endif

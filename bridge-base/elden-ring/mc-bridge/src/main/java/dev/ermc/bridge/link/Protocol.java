@@ -56,6 +56,7 @@ public final class Protocol {
 	public static final int STATE_PLAYER_DEAD = 1 << 7;
 	/** Dead, loading or settling after one: keep the overlay, draw nothing over Elden Ring. */
 	public static final int STATE_HOST_BUSY = 1 << 8;
+	public static final int STATE_SUPPORT_VALID = 1 << 9;
 
 	// ErmcGameState offsets (relative to OFF_STATE)
 	public static final int S_SEQ = 0x00;
@@ -76,6 +77,9 @@ public final class Protocol {
 	public static final int S_STAGE = 0x7C;
 	public static final int S_VIEW = 0x80;
 	public static final int S_PROJ = 0xC0;
+	public static final int S_SUPPORT_EPOCH = 0x100;
+	public static final int S_SUPPORT_TRAVEL_Y = 0x104;
+	public static final int S_SUPPORT_POS = 0x108;
 
 	// ErmcControl.flags
 	public static final int CTRL_OVERRIDE_CAMERA = 1;
@@ -85,6 +89,8 @@ public final class Protocol {
 	public static final int CTRL_COMPOSITE = 1 << 4;
 	public static final int CTRL_NO_DEPTH_TEST = 1 << 5;
 	public static final int CTRL_DEBUG_DEPTH = 1 << 6;
+	public static final int CTRL_GROUNDED = 1 << 8;
+	public static final int CTRL_FLYING = 1 << 9;
 
 	// ErmcControl offsets (relative to OFF_CONTROL)
 	public static final int C_SEQ = 0x00;
@@ -98,6 +104,8 @@ public final class Protocol {
 	public static final int C_POSE_LAG = 0x44;
 	public static final int C_DEPTH_INDEX = 0x48;
 	public static final int C_HUNTER_YAW = 0x58;
+	public static final int C_SUPPORT_EPOCH = 0x5C;
+	public static final int C_SUPPORT_TRAVEL_Y = 0x60;
 
 	// ErmcHunterEvents (hits the stand-in hunter took), absolute offset
 	public static final int OFF_HUNTER = 0x0A00;
@@ -159,6 +167,11 @@ public final class Protocol {
 	public static final int PASSAGE_SIZE = 0x20;
 	/** Floats per passage in {@link BridgeShm#readPassages}: x, y, z, yaw, halfWidth, halfDepth, height, id. */
 	public static final int PASSAGE_FLOATS = 8;
+
+	public static final int OFF_PLATFORMS = 0x310000;
+	public static final int MAX_PLATFORM_CELLS = 169;
+	public static final int PLATFORM_FLOATS = 7;
+	public static final int PLATFORM_CELL_SIZE = 32;
 
 	// Damage ring (ErmcDamageQueue), relative to OFF_DAMAGE.
 	// ErmcDamage.amount is in Minecraft damage points, after all of Minecraft's own modifiers

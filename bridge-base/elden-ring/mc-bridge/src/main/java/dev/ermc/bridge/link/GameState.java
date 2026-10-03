@@ -19,6 +19,9 @@ public final class GameState {
 	public int winX, winY, winW, winH;
 	public int bbW, bbH;
 	public int stageId;
+	public int supportEpoch;
+	public float supportTravelY;
+	public final float[] supportPos = new float[3];
 
 	public boolean has(int flag) {
 		return (flags & flag) != 0;
@@ -44,6 +47,9 @@ public final class GameState {
 		bbW = b.getInt(base + Protocol.S_BB);
 		bbH = b.getInt(base + Protocol.S_BB + 4);
 		stageId = b.getInt(base + Protocol.S_STAGE);
+		supportEpoch = b.getInt(base + Protocol.S_SUPPORT_EPOCH);
+		supportTravelY = b.getFloat(base + Protocol.S_SUPPORT_TRAVEL_Y);
+		readFloats(b, base + Protocol.S_SUPPORT_POS, supportPos);
 	}
 
 	public void copyFrom(GameState o) {
@@ -66,6 +72,9 @@ public final class GameState {
 		bbW = o.bbW;
 		bbH = o.bbH;
 		stageId = o.stageId;
+		supportEpoch = o.supportEpoch;
+		supportTravelY = o.supportTravelY;
+		System.arraycopy(o.supportPos, 0, supportPos, 0, 3);
 	}
 
 	private static void readFloats(ByteBuffer b, int off, float[] out) {

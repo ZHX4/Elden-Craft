@@ -37,7 +37,7 @@ static void gpu_init(UINT w, UINT h) {
     MemoryBarrier(); InterlockedExchange((volatile LONG*)(g_frames+0x40),0x47504d43);
     log("gpu transport: shared textures ready %ux%u generation %u",w,h,g_gpuGeneration);
 }
-static void gpu_acknowledge(uint64_t lastUploaded) {
+static void gpu_acknowledge(uint64_t lastUploaded, bool discardAll = false) {
     if(!g_gpuReady) return;
     UINT64 complete=g_fence->GetCompletedValue();
     for(unsigned s=0;s<kGpuSlots;s++) if(g_gpuAckFence[s] && complete>=g_gpuAckFence[s]) {
@@ -48,7 +48,7 @@ static void gpu_acknowledge(uint64_t lastUploaded) {
     // A header may be replaced while an older texture is still awaiting release.
     for(unsigned s=0;s<kGpuSlots;s++) {
         UINT64 id=(UINT64)InterlockedCompareExchange64((volatile LONG64*)(g_frames+0xA0+s*8),0,0);
-        if(!id || id>=lastUploaded || g_gpuAckFence[s] || g_gpuReady->GetCompletedValue()<id) continue;
+        if(!id || (!discardAll && id>=lastUploaded) || g_gpuAckFence[s] || g_gpuReady->GetCompletedValue()<id) continue;
         auto* ack=(volatile LONG64*)(g_frames+0x60+s*8);
         if((UINT64)*ack<id) InterlockedExchange64(ack,id);
     }
@@ -56,7 +56,7 @@ static void gpu_acknowledge(uint64_t lastUploaded) {
     // obsolete captures too, otherwise one unconsumed slot stops the whole ring.
     for(unsigned i=0;i<ERMC_FRAME_SLOTS;i++) {
         auto* h=slot_header(i);
-        if((h->seq&1) || !(h->flags&8) || h->frameId>=lastUploaded) continue;
+        if((h->seq&1) || !(h->flags&8) || (!discardAll && h->frameId>=lastUploaded)) continue;
         unsigned s=*(UINT*)((uint8_t*)h+0x30), gen=*(UINT*)((uint8_t*)h+0x34);
         if(s>=kGpuSlots || gen!=g_gpuGeneration || g_gpuAckFence[s] || g_gpuReady->GetCompletedValue()<h->frameId) continue;
         auto* ack=(volatile LONG64*)(g_frames+0x60+s*8);

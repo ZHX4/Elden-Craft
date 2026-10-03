@@ -1,190 +1,170 @@
 # Minecraft Ring
 
-At the moment, there are some bugs; they will be fixed in the near future.
+![Minecraft Ring gameplay in Elden Ring](docs/images/minecraft-ring.jpg)
 
-There are bugs with F8, and there may be bugs with overlaying the Minecraft window.
+**Minecraft movement, building and combat in the Lands Between.**
 
-Minecraft building and movement in the Lands Between.
+[![Windows x64](https://img.shields.io/badge/platform-Windows_x64-0078D4)](#requirements)
+[![Minecraft 1.21.1](https://img.shields.io/badge/Minecraft-1.21.1-62B47A)](#requirements)
+[![Experimental 0.2.0](https://img.shields.io/badge/status-experimental_0.2.0-D9A441)](CHANGELOG.md)
+[![MIT license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Minecraft Ring runs Minecraft alongside Elden Ring and brings Minecraft's player,
-blocks and inventory into Elden Ring's view. Minecraft drives movement and block
-interaction; Elden Ring supplies the world, enemies and native interactions.
-The two games share player and camera state, terrain information and rendered
-frames through a native bridge and a Fabric mod.
+Minecraft Ring runs real Minecraft Java Edition alongside Elden Ring. Explore
+with Minecraft's controls, bring your inventory and skin, build in Elden Ring's
+world, and fight its enemies with Minecraft weapons. Elden Ring keeps running
+its own world, characters, interactions and saves.
 
-**Status: experimental Windows port.** Local play has been tested, including
-block occlusion and breaking Elden Ring props. Distant areas and transitions
-still need wider testing; this is a research mod with rough edges.
+A native Windows bridge and a Fabric mod connect the games. Minecraft handles
+the player and blocks; Elden Ring draws the combined scene, including Minecraft's
+hand, character and HUD. Both games stay running throughout a session.
 
-## What you can do
+> **Experimental Windows port.** Local gameplay has been tested, but terrain,
+> transitions, moving platforms and rendering still have rough edges. The
+> supported setup is offline single-player on the game versions below.
 
-- Move, jump and look around with Minecraft controls.
-- Place and break Minecraft blocks in Elden Ring's world.
-- Use Minecraft's inventory and switch between first and third person.
-- Interact with Elden Ring doors, items and Sites of Grace.
-- Switch control back to Elden Ring with F8.
+[Setup guide](docs/installation.md) · [Development and diagnostics](docs/development.md) ·
+[Changelog](CHANGELOG.md) · [Report an issue](https://github.com/siddoff/Minecraft-Ring/issues)
 
-## How the bridge works
+## What works
 
-| Component | Role |
-| --- | --- |
-| `er-bridge/src/` | Native Windows loader and D3D12 bridge: host state, camera, terrain and compositing. |
-| `mc-bridge/src/` | Fabric mod: Minecraft player, terrain collision, block interaction and frame capture. |
-| `er-bridge/include/bridge_protocol.h` | Shared protocol used to exchange state between the games. |
-| `Launch.ps1` | Starts Elden Ring, waits for the bridge, then launches Minecraft. |
-| `tools/` | Native build script and diagnostics for the local bridge. |
+- **Movement and camera.** Walk, sprint, jump, crouch and fly with Minecraft
+  controls. First-person and both third-person views show Minecraft's player
+  inside Elden Ring.
+- **Building.** Place and break Minecraft blocks, use your inventory and keep
+  your builds in the local bridge world. Host terrain is represented by
+  invisible collision blocks; Elden Ring's ground itself cannot be mined.
+- **Combat.** Elden Ring enemies have Minecraft hitboxes. Melee attacks,
+  projectiles and explosions send damage to the host game; enemy hits and status
+  damage reach Minecraft in survival mode. Death and recall connect back to
+  Elden Ring's respawn at a Site of Grace.
+- **Native interactions.** Use doors, levers, items and Sites of Grace with R.
+  Punching breakable Elden Ring props forwards an attack and refreshes nearby
+  collision.
+- **Terrain and passages.** Native collision rays build the walkable surface.
+  Nearby detail sampling refines narrow arches and angled walls, refreshes
+  opened doors, and samples ahead as you move.
+- **Lifts and platforms.** Moving-floor detection supports boarding, vertical
+  travel, jumping and landing, including gently sloped platforms and partial
+  contact at an edge. Support tracking runs separately from terrain sampling.
+- **Rendering.** Minecraft content is composited into Elden Ring's D3D12 frame
+  with host depth occlusion. Shared GPU textures are used when supported, with
+  a memory transfer fallback. The bridge manages its own borderless input window.
+- **Control switching.** F8 hands camera and controls to Elden Ring for its
+  menus and normal gameplay. Press it again to return to Minecraft.
 
-Native and Fabric sources live under `bridge-base/elden-ring/`. On supported
-hardware, frames use shared OpenGL/D3D12 GPU textures; a memory transfer path is
-available as a fallback. Borderless rendering supports frame sizes up to
-3840 x 2160. Both games run at the same time, so performance depends on the
-combined CPU, GPU and memory load.
+## What's new in 0.2.0
+
+This update focuses on moving around Elden Ring's world: moving platforms now
+publish nearby boarding collision and track passengers, narrow passages receive
+finer collision shapes, and terrain is prefetched along your route. Door changes
+invalidate stale collision samples, while overhead geometry is checked before
+it can become a solid column.
+
+The Windows overlay now works without Borderless Fullscreen or b100lib. F8
+suspends camera publishing and retires pending GPU captures so frame transfer
+can resume after the handoff. Native fault recording adds context, thread stacks
+and minidumps for debugging. See the [changelog](CHANGELOG.md) for the full list.
 
 ## Requirements
 
-- Windows x64 and hardware capable of running both games simultaneously.
-- Your own copies of Elden Ring and Minecraft Java Edition.
-- Elden Ring executable version `2.7.1.0` / game version `1.17.1`, the version
-  targeted by this port. Other builds have not been verified.
-- Minecraft `1.21.1`; Fabric versions are pinned in `mc-bridge/gradle.properties`.
-- Python 3 and LLVM-MinGW for the native build.
-- JDK 25 for Gradle, plus a JDK 21 toolchain for Minecraft.
-- Gradle `9.7.1` for the current Windows launcher.
-- Borderless Fullscreen `2.4.1` and b100lib `0.2.2` for Minecraft `1.21.1`.
+| Component | Supported setup |
+| --- | --- |
+| Operating system | Windows x64 |
+| Elden Ring | App Ver. **1.17.1**, executable **2.7.1.0**; other builds are unverified |
+| Minecraft | Java Edition **1.21.1** |
+| Fabric Loader / API | **0.19.5** / **0.116.17+1.21.1**, pinned in the project |
+| Build tools | Python 3, LLVM-MinGW, **JDK 25**, **Gradle 9.7.1** |
+| Hardware | Enough CPU, GPU and RAM to run both games together; the launcher gives Minecraft a 3 GB maximum heap |
 
-Use the bridge for offline single-player play. The launcher starts
-`eldenring.exe` directly, and the loader requires its launcher marker and refuses
-to load while Easy Anti-Cheat is present.
+You need your own copies of both games. Launch through the included scripts for
+offline play: the loader requires the bridge launcher marker and refuses to
+activate while Easy Anti-Cheat is present. Addresses and hooks target the listed
+Elden Ring build.
 
-## Build and install
+## Getting started
 
-This repository contains source, not a ready-to-play game bundle. Downloaded
-runtimes, compiled DLLs, game files and saves are deliberately excluded.
+The repository contains source and launch scripts. Toolchains and game
+installations are obtained separately; there is no packaged installer yet.
 
-1. Clone the repository:
+1. Clone the project:
 
    ```powershell
    git clone https://github.com/siddoff/Minecraft-Ring.git
    cd Minecraft-Ring
    ```
 
-2. Prepare the layout expected by the current build scripts:
-
-   ```text
-   .tools/
-     compiler/<llvm-mingw-folder>/bin/clang++.exe
-     java/<jdk-25-folder>/bin/java.exe
-     gradle/<gradle-folder>/bin/gradle.bat
-     mods/BorderlessFullscreen-v2.4.1-mc1.21.1.jar
-     mods/b100lib-0.2.2-1.21.1.jar
-   ```
-
-   Install JDK 21 where Gradle can discover it. Only put JDK 25 in `.tools/java/`,
-   because the launcher selects the first directory there. Toolchains and mod
-   dependencies must be obtained separately; they are not uploaded to GitHub.
-
-3. Build the native bridge from the repository root:
+2. Prepare the tools described in the [setup guide](docs/installation.md#toolchains),
+   then build the native DLLs:
 
    ```powershell
    python tools/build_native.py
    ```
 
-   This creates `dist/dinput8.dll` and `dist/erbridge_core.dll`. The launcher
-   builds the Fabric mod with `remapJar` before `runClient`. For a standalone
-   Fabric build with JDK 25 configured:
-
-   ```powershell
-   .\bridge-base\elden-ring\mc-bridge\gradlew.bat -p .\bridge-base\elden-ring\mc-bridge build
-   ```
-
-4. Close Elden Ring and install into your own game directory:
+3. Close Elden Ring and install into the folder containing `eldenring.exe`:
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -GameDir 'D:\SteamLibrary\steamapps\common\ELDEN RING\Game'
    ```
 
-   Replace the example path with your actual `Game` directory. The installer
-   backs up Elden Ring saves and moves recognized existing mod loaders into
-   `backups/` before installing the bridge. Local paths are recorded in the
-   ignored `installation.json`.
+   Replace the example path with yours. The installer backs up Elden Ring saves
+   and moves recognized existing mod files into the project's `backups/` folder.
 
-5. For borderless play, create
-   `bridge-base/elden-ring/mc-bridge/run/config/fullscreenfix.properties` with:
+4. Double-click **start.bat** or **Play.bat**. Once the bridge is ready, choose
+   **Continue** in Elden Ring. The launcher builds and starts Minecraft, which
+   opens its bridge world automatically.
 
-   ```properties
-   exclusiveFullscreen:false
-   autoMinimize:false
-   startInFullscreen:true
-   ```
+Minecraft stays windowed; the bridge aligns its borderless input window with
+Elden Ring. Keep the launcher console open while playing. The first bridge world
+starts in creative mode. Use `/gamemode survival` to take enemy damage, or
+`/gamemode creative` to switch back.
 
-   Enable fullscreen in Minecraft's video settings. Local settings and worlds
-   remain outside version control.
-
-## Playing
-
-Double-click **start.bat** (or **Play.bat**). Wait for the native bridge to load,
-then choose **Continue** in Elden Ring. Minecraft starts in its separate bridge
-world and connects to the host character.
+## Controls
 
 | Input | Action |
 | --- | --- |
-| WASD, mouse, Space | Minecraft movement, view and jump |
-| F5 | First-person / third-person view |
+| WASD / mouse / Space / Shift | Move / look / jump / crouch |
+| Left / right mouse button | Attack or break / use or place |
 | E | Minecraft inventory |
-| Left / right mouse button | Attack or break / use or place a block |
-| R | Elden Ring interaction: doors, items, Sites of Grace |
-| F8 | Switch control between Elden Ring and Minecraft |
-| T | Minecraft chat and commands |
+| F5 | Cycle first-person and third-person views |
+| R | Elden Ring interaction: doors, levers, items and Sites of Grace |
+| F8 | Switch control between Minecraft and Elden Ring |
+| T / / | Minecraft chat / commands |
 
-The initial mode is creative. Use `/gamemode survival` for survival or
-`/gamemode creative` to switch back. Spectator mode bypasses normal collisions.
-Left-click also forwards attacks to breakable Elden Ring props.
+Release F8 between presses. In Elden Ring mode Minecraft pauses and hides; the
+next press returns it to the Tarnished's position. F6 toggles compositing, F7
+switches camera mode, F9 shows diagnostics, and F10 toggles the hidden Tarnished
+stand-in. Those are development controls; the normal setup uses compositing and
+Minecraft-driven movement.
 
-## Diagnostics and removal
+## Known limitations
 
-- `python tools/status.py` reports the bridge processes and current state.
-- Native logs are written to `runtime/er-bridge.log`.
-- Minecraft logs are under `bridge-base/elden-ring/mc-bridge/run/logs/`.
-- With Elden Ring closed, run `Restore.ps1` to disable the bridge and restore
-  previously moved mod files. Save backups are not automatically restored.
+- Terrain is sampled as you explore. Distant geometry, fast travel, narrow
+  passages and platform edge cases need wider gameplay testing.
+- GPU sharing and window transparency depend on the graphics driver. The memory
+  fallback adds transfer overhead; frames support sizes up to 3840 × 2160.
+- Other Elden Ring builds and combinations with other mods are unverified.
+- Multiplayer is unverified; the current supported workflow is single-player.
+- Setup uses a fixed local toolchain layout and a Gradle development client.
+  Automatic tool installation and a portable release are still outstanding.
 
-Some diagnostic tools operate on live bridge memory; inspect the script before
-using it during play. `tools/screenshot.py` requires Pillow.
+For startup or rendering problems, see [troubleshooting](docs/installation.md#troubleshooting).
+To disable the bridge, close Elden Ring and run `Restore.ps1`; it restores the
+previously moved mod files. Save backups are kept for manual recovery.
 
-## Current limitations
+## Project and credits
 
-- Addresses and hooks are tied to the targeted Elden Ring build.
-- Distant terrain, area transitions and edge cases need more testing.
-- Rendering and GPU sharing depend on the driver; the fallback can cost more CPU.
-- Both games must stay running, with enough resources for each.
-- The launcher currently expects the local tool layout shown above.
-- This repository does not include a packaged release or an automatic setup tool.
-
-## Repository contents
-
-| Path | Contents |
-| --- | --- |
-| `bridge-base/elden-ring/er-bridge/` | Native bridge, protocol and MinHook source |
-| `bridge-base/elden-ring/mc-bridge/` | Fabric sources and Gradle wrapper |
-| `tools/` | Build and diagnostic scripts |
-| `Install.ps1`, `Launch.ps1`, `Restore.ps1` | Windows setup, launch and removal |
-| `LICENSE`, `THIRD_PARTY_NOTICES.md` | Project license and third-party attribution |
-
-`.gitignore` excludes files by default and explicitly allows project files.
-Downloaded `.tools/`, `references/`, `backups/`, `runtime/`, `build/`, `dist/`,
-installation records, Minecraft worlds, caches and logs are excluded. Unrelated
-upstream Monster Hunter code and the nested upstream Git history are excluded.
-New top-level project files need an explicit allow rule.
-
-## Credits and license
+The [native bridge and Fabric mod](bridge-base/elden-ring/README.md) live under
+`bridge-base/elden-ring/`. Windows build and diagnostic helpers are in `tools/`.
+The [development guide](docs/development.md) covers the protocol, regression
+checks and local data paths.
 
 Based on [minecraft-crossover-bridge](https://github.com/justbustin/minecraft-crossover-bridge)
-by justbustin, with Windows adaptation and integration by siddoff.
+by **justbustin**, with Windows adaptation and integration by **siddoff**.
 [SkyCraft](https://github.com/chasmlol/SkyCraft) and
-[ArkWeb](https://github.com/luki-1/ArkWeb) informed the architectural research.
+[ArkWeb](https://github.com/luki-1/ArkWeb) informed the architectural research
+and presentation of the project.
 
-The bridge code is available under the [MIT License](LICENSE). See
-[third-party notices](THIRD_PARTY_NOTICES.md) for bundled code and dependencies.
-
-An unofficial fan project, unaffiliated with Mojang, Microsoft, FromSoftware
-or Bandai Namco. No game installations or save files are distributed here.
+Bridge code is available under the [MIT License](LICENSE). Bundled code and
+dependencies are covered in [third-party notices](THIRD_PARTY_NOTICES.md).
+Minecraft Ring is an unofficial fan project, unaffiliated with Mojang,
+Microsoft, FromSoftware or Bandai Namco. Game files and saves are not distributed.

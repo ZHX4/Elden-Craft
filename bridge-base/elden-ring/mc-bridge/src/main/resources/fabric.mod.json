@@ -2,9 +2,14 @@
 	"schemaVersion": 1,
 	"id": "erbridge",
 	"version": "${version}",
-	"name": "ER Bridge",
-	"description": "Passthrough bridge that runs Minecraft inside Elden Ring.",
-	"authors": ["justbustin"],
+	"name": "Minecraft Ring",
+	"description": "Minecraft movement, building and combat in Elden Ring through a native Windows bridge.",
+	"authors": ["justbustin", "siddoff"],
+	"contact": {
+		"homepage": "https://github.com/siddoff/Minecraft-Ring",
+		"sources": "https://github.com/siddoff/Minecraft-Ring",
+		"issues": "https://github.com/siddoff/Minecraft-Ring/issues"
+	},
 	"license": "MIT",
 	"icon": "assets/erbridge/icon.png",
 	"environment": "*",
