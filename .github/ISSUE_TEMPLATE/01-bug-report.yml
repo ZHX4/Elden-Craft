@@ -1,0 +1,82 @@
+name: Bug report
+description: Report a crash, rendering problem or gameplay bug.
+title: "[Bug] "
+labels: [bug, "status: needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You can write in English or Russian. Search existing issues before reporting.
+        Check the [setup guide](https://github.com/siddoff/Minecraft-Ring/blob/main/docs/installation.md#troubleshooting) for known startup problems.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: The selected area receives its own label automatically.
+      options:
+        - Rendering and overlay
+        - Terrain and collision
+        - Moving platforms
+        - Controls and F8
+        - Combat and interactions
+        - Build and installation
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the Elden Ring location and whether this started after F8, fast travel, a door or a lift.
+      placeholder: |
+        1. Start at...
+        2. Move or interact with...
+        3. The problem occurs when...
+    validations:
+      required: true
+  - type: input
+    id: mod-version
+    attributes:
+      label: Minecraft Ring version or commit
+      placeholder: "For example: 0.2.0 or 7d19cd4"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Game versions and hardware
+      description: Include any other mods, especially rendering or fullscreen mods.
+      placeholder: |
+        Windows version:
+        Elden Ring app / executable version:
+        Minecraft / Fabric versions:
+        GPU and driver:
+        Other mods:
+    validations:
+      required: true
+  - type: dropdown
+    id: game-mode
+    attributes:
+      label: Minecraft game mode
+      options:
+        - Creative
+        - Survival
+        - Spectator
+        - Not in game / not sure
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots or video
+      description: |
+        Paste relevant excerpts or attach logs and screenshots.
+        Native log: runtime/er-bridge.log
+        Minecraft log: bridge-base/elden-ring/mc-bridge/run/logs/latest.log
+        For native crashes, attach runtime/eldenring-crash.txt if available.
+        Review files for personal information before sharing them publicly.

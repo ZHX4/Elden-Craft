@@ -1,0 +1,18 @@
+[
+  {"name": "bug", "color": "d73a4a", "description": "A reproducible problem with the bridge"},
+  {"name": "enhancement", "color": "a2eeef", "description": "A new feature or improvement"},
+  {"name": "question", "color": "d876e3", "description": "Usage question or setup help"},
+  {"name": "documentation", "color": "0075ca", "description": "Setup guides, README or other documentation"},
+  {"name": "status: needs triage", "color": "ededed", "description": "New report awaiting review and categorization"},
+  {"name": "status: needs info", "color": "fff3cd", "description": "Waiting for logs, reproduction steps or clarification"},
+  {"name": "status: confirmed", "color": "0e8a16", "description": "Reviewed and reproduced or accepted"},
+  {"name": "status: in progress", "color": "1d76db", "description": "Work is currently underway"},
+  {"name": "priority: high", "color": "b60205", "description": "Crash, data loss or a major gameplay/startup blocker"},
+  {"name": "priority: low", "color": "c5def5", "description": "Minor issue or optional polish"},
+  {"name": "area: rendering", "color": "5319e7", "description": "D3D12 compositing, GPU transfer, overlay or camera rendering"},
+  {"name": "area: terrain", "color": "22863a", "description": "Static collision, doors, passages or terrain sampling"},
+  {"name": "area: platforms", "color": "fbca04", "description": "Moving lifts, boarding and passenger support"},
+  {"name": "area: controls", "color": "0052cc", "description": "Keyboard, mouse, focus or F8 control switching"},
+  {"name": "area: combat", "color": "e99695", "description": "Enemy proxies, damage, death or native interactions"},
+  {"name": "area: setup", "color": "bfdadc", "description": "Build tools, installation, launcher or removal"}
+]

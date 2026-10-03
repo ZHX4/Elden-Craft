@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Setup and troubleshooting
+    url: https://github.com/siddoff/Minecraft-Ring/blob/main/docs/installation.md
+    about: Check supported versions, build steps and common startup problems.
+  - name: Controls and known limitations
+    url: https://github.com/siddoff/Minecraft-Ring#controls
+    about: Read the current controls and gameplay limitations before opening an issue.

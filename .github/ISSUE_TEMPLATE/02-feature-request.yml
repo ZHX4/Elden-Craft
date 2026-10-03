@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest a feature or improvement for Minecraft Ring.
+title: "[Feature] "
+labels: [enhancement, "status: needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You can write in English or Russian. Search existing issues to see if the idea is already being discussed.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Rendering and overlay
+        - Terrain and collision
+        - Moving platforms
+        - Controls and F8
+        - Combat and interactions
+        - Build and installation
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Describe what you want to do and what is difficult today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement
+      description: Explain the behavior you would like to see.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and examples
+      description: Optional workarounds, screenshots or references that explain the idea.

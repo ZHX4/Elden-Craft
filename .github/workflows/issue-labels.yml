@@ -1,0 +1,61 @@
+name: Label issues
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+concurrency:
+  group: issue-labels-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  label:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Apply triage and area labels
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const repo = context.repo;
+            const issue_number = context.issue.number;
+            // Read the current body and labels so queued edits do not use stale payloads.
+            const { data: issue } = await github.rest.issues.get({ ...repo, issue_number });
+            if (issue.pull_request || issue.state !== 'open') return;
+
+            const areas = new Map([
+              ['Rendering and overlay', 'area: rendering'],
+              ['Terrain and collision', 'area: terrain'],
+              ['Moving platforms', 'area: platforms'],
+              ['Controls and F8', 'area: controls'],
+              ['Combat and interactions', 'area: combat'],
+              ['Build and installation', 'area: setup'],
+            ]);
+            const section = (issue.body || '').match(/^### Affected area\r?\n\s*\r?\n([^\r\n]+)/m);
+            const selected = section?.[1].trim();
+            const target = areas.get(selected);
+            const labels = new Set(issue.labels.map(label => label.name));
+            const additions = [];
+            const triage = 'status: needs triage';
+            if (context.payload.action === 'opened' && !labels.has(triage)) additions.push(triage);
+            if (target && !labels.has(target)) additions.push(target);
+
+            // Only change area labels for a recognized form choice; freeform issues
+            // and all other labels remain under maintainer control.
+            if (target || selected === 'Other / not sure') {
+              for (const label of areas.values()) {
+                if (label !== target && labels.has(label)) {
+                  try {
+                    await github.rest.issues.removeLabel({ ...repo, issue_number, name: label });
+                  } catch (error) {
+                    if (error.status !== 404) throw error;
+                  }
+                }
+              }
+            }
+            if (additions.length) {
+              await github.rest.issues.addLabels({ ...repo, issue_number, labels: additions });
+            }

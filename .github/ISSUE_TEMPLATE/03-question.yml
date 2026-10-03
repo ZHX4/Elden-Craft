@@ -1,0 +1,44 @@
+name: Question or setup help
+description: Ask about installation, controls or using the bridge.
+title: "[Question] "
+labels: [question, "status: needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You can write in English or Russian.
+        Read the [setup guide](https://github.com/siddoff/Minecraft-Ring/blob/main/docs/installation.md) and search existing issues first.
+        If something reproducibly fails, use the Bug report form instead.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Rendering and overlay
+        - Terrain and collision
+        - Moving platforms
+        - Controls and F8
+        - Combat and interactions
+        - Build and installation
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: Explain what you are trying to do and where you need help.
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Include the guide steps or settings you have already checked.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Versions, hardware and logs
+      description: For setup problems, include the mod version, Windows and game versions, GPU and relevant log excerpts.

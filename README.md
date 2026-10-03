@@ -148,6 +148,9 @@ Minecraft-driven movement.
   Automatic tool installation and a portable release are still outstanding.
 
 For startup or rendering problems, see [troubleshooting](docs/installation.md#troubleshooting).
+Use the [issue forms](https://github.com/siddoff/Minecraft-Ring/issues/new/choose)
+for bugs, feature requests and setup questions; English and Russian are welcome.
+The [issue guide](docs/issues.md) explains automatic labels and useful report details.
 To disable the bridge, close Elden Ring and run `Restore.ps1`; it restores the
 previously moved mod files. Save backups are kept for manual recovery.
 

@@ -2,6 +2,15 @@
 /*
 !/.gitignore
 !/.gitattributes
+!/.github/
+/.github/*
+!/.github/ISSUE_TEMPLATE/
+/.github/ISSUE_TEMPLATE/*
+!/.github/ISSUE_TEMPLATE/*.yml
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/issue-labels.yml
+!/.github/labels.json
 !/README.md
 !/CHANGELOG.md
 !/docs/
