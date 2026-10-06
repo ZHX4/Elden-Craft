@@ -182,7 +182,10 @@ public final class DevCommands {
 					var id = mc.player.getUUID();
 					if (server != null) server.execute(() -> {
 						var player = server.getPlayerList().getPlayer(id);
-						if (player != null) LOG.info("[devcmd] terrain prefetch: {}", dev.ermc.bridge.TerrainManager.describePrefetch(player));
+						if (player != null) {
+							LOG.info("[devcmd] terrain prefetch: {}", dev.ermc.bridge.TerrainManager.describePrefetch(player));
+							LOG.info("[devcmd] terrain detail: {}", dev.ermc.bridge.TerrainDetailManager.describe(player));
+						}
 					});
 				}
 			}
@@ -234,11 +237,34 @@ public final class DevCommands {
 	private static String passageCheck(net.minecraft.world.level.Level level, net.minecraft.world.entity.Entity player,
 		net.minecraft.world.phys.AABB body, Vec3 direction) {
 		double clear = 0;
+		double stepped = 0;
+		String obstruction = "none";
 		for (double distance = .125; distance <= 4; distance += .125) {
-			if (!level.noCollision(player, body.move(direction.scale(distance)))) break;
+			var trial = body.move(direction.scale(distance)).move(0, stepped, 0);
+			if (!level.noCollision(player, trial)) {
+				boolean step = false;
+				if (player.onGround()) for (double rise = .0625; rise <= player.maxUpStep(); rise += .0625) {
+					if (level.noCollision(player, trial.move(0, rise, 0))) { stepped += rise; step = true; break; }
+				}
+				if (!step) {
+					var blocks = new StringBuilder();
+					for (var pos : net.minecraft.core.BlockPos.betweenClosed(
+						net.minecraft.core.BlockPos.containing(trial.minX, trial.minY, trial.minZ),
+						net.minecraft.core.BlockPos.containing(trial.maxX, trial.maxY, trial.maxZ))) {
+						var state = level.getBlockState(pos);
+						var shape = state.getCollisionShape(level, pos, net.minecraft.world.phys.shapes.CollisionContext.of(player));
+						for (var box : shape.toAabbs()) if (box.move(pos).intersects(trial)) {
+							blocks.append(pos).append(' ').append(state).append(" box ").append(box).append("; ");
+							break;
+						}
+					}
+					obstruction = blocks.toString();
+					break;
+				}
+			}
 			clear = distance;
 		}
 		boolean floor = !level.noCollision(player, body.move(0, -.125, 0));
-		return "forward clearance " + clear + " m; floor support " + floor;
+		return "forward clearance " + clear + " m; floor support " + floor + "; stepped up " + stepped + "; obstruction " + obstruction;
 	}
 }

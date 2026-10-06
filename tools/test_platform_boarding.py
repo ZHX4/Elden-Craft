@@ -16,12 +16,12 @@ cpp = r'''
 #include <cstring>
 #include "bridge_protocol.h"
 constexpr uint32_t kTerrainRayFilter=0x5d;
-struct ErmcControlMock {float hunterPos[3]={0,10,0};};
-struct ErmcRayHitMock {int hit;float pos[3];};
+struct ErmcControlMock {float hunterPos[3]={0,10,0};uint32_t flags=ERMC_CTRL_FLYING;};
+struct ErmcRayHitMock {int hit;float pos[3];float normal[3]={0,1,0};};
 #define ErmcControl ErmcControlMock
 #define ErmcRayHit ErmcRayHitMock
 uint64_t clockMs=1000;
-float floorY=10,slope=0;
+float floorY=10,slope=0,ceilingY=0;
 bool present=true,wall=false,edge=false;
 ErmcPlatformTable table={};
 uint64_t now_ms(){return clockMs;}
@@ -32,6 +32,11 @@ bool raycast(const float* a,const float* b,uint32_t,void*,ErmcRayHit* hit){
     if(wall && a[1]>floorY+.3f && a[1]<floorY+3) solid=true;
     if(present && !(edge && a[0]>.1f) && a[0]==b[0] && a[2]==b[2])
         solid |= (a[1]>=floor && b[1]<=floor)||(b[1]>=floor && a[1]<=floor);
+    if(ceilingY && a[0]==b[0] && a[2]==b[2]
+        && ((a[1]>=ceilingY && b[1]<=ceilingY)||(b[1]>=ceilingY && a[1]<=ceilingY))) {
+        if(!solid || a[1]>=ceilingY) floor=ceilingY;
+        solid=true;
+    }
     hit->hit=solid;hit->pos[0]=a[0];hit->pos[1]=floor;hit->pos[2]=a[2];return solid;
 }
 '''
@@ -59,7 +64,25 @@ int main(){
     floorY+=.165f;clockMs+=50;update_platform_cells(c,true,15,nullptr);
     for(unsigned i=0;i<table.count;i++)if(table.cells[i].flags&1)assert(table.cells[i].x+.3125f<=.10001f);
     clockMs+=50;update_platform_cells(c,false,15,nullptr);assert(table.count==0);
-    puts("PASS: boarding before contact, moving slopes, intact walls, repeated old-floor removal, edges and zone resets");
+    // Static collision belongs to the independent contact sampler, not the lift
+    // mailbox; it must never publish flat clearance patches across stair treads.
+    c.flags=0;edge=false;present=true;floorY=10;
+    clockMs+=50;update_platform_cells(c,true,16,nullptr);assert(table.count==0);
+    ceilingY=13;clockMs+=50;update_platform_cells(c,true,17,nullptr);assert(table.count==0);
+    ceilingY=0;
+    // A closed door cannot be erased; opening it clears the next publication.
+    wall=true;clockMs+=50;update_platform_cells(c,true,17,nullptr);assert(table.count==0);
+    wall=false;clockMs+=50;update_platform_cells(c,true,17,nullptr);assert(table.count==0);
+    // The floor remains in the swept query even after a fast descent crosses it.
+    c.hunterPos[1]=18;clockMs+=50;update_platform_cells(c,true,17,nullptr);
+    c.hunterPos[1]=8;clockMs+=50;update_platform_cells(c,true,17,nullptr);assert(table.count==0);
+    present=false;clockMs+=50;update_platform_cells(c,true,17,nullptr);assert(table.count==0);
+    // A shifted vertical query can reveal a static overhead floor. Repeating
+    // the old ray window must still find the old floor, rejecting false travel.
+    present=true;ceilingY=11;c.hunterPos[1]=6.6f;
+    clockMs+=50;update_platform_cells(c,true,18,nullptr);assert(table.count==0);
+    c.hunterPos[1]=7.2f;clockMs+=50;update_platform_cells(c,true,18,nullptr);assert(table.count==0);
+    puts("PASS: moving platforms, no static-floor carving, closed/open doors, missing ground and zone resets");
 }
 '''
 (out / 'native.cpp').write_text(cpp, encoding='utf-8')

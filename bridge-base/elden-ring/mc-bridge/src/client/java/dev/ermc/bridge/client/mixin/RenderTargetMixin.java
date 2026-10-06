@@ -4,7 +4,9 @@ import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.GlStateManager;
 import dev.ermc.bridge.client.FramePassthrough;
 import dev.ermc.bridge.client.Overlay;
+import dev.ermc.bridge.client.WindowsOverlay;
 import net.minecraft.client.Minecraft;
+import org.lwjgl.system.Platform;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -32,6 +34,9 @@ public abstract class RenderTargetMixin {
 	private void erbridge$clearWindow(int width, int height, boolean disableBlend, CallbackInfo ci) {
 		if (!erbridge$isWindowBlit()) {
 			return;
+		}
+		if (Platform.get() == Platform.WINDOWS) {
+			WindowsOverlay.updateCursor(Minecraft.getInstance());
 		}
 		FramePassthrough.endFrame(Minecraft.getInstance());
 		if (!Overlay.transparentWindow()) {

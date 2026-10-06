@@ -89,7 +89,7 @@ public final class WorldBootstrap {
 		mc.createWorldOpenFlows().createFreshLevel(LEVEL_ID, settings, options, registries -> {
 			HolderGetter<Biome> biomes = registries.lookupOrThrow(Registries.BIOME);
 			HolderSet<StructureSet> noStructures = HolderSet.direct();
-			FlatLevelGeneratorSettings flat = new FlatLevelGeneratorSettings(Optional.of(noStructures), biomes.getOrThrow(Biomes.THE_VOID), List.of());
+			FlatLevelGeneratorSettings flat = new FlatLevelGeneratorSettings(Optional.of(noStructures), biomes.getOrThrow(Biomes.PLAINS), List.of());
 			flat.getLayersInfo().add(new FlatLayerInfo(1, Blocks.AIR));
 			flat.updateLayers();
 			WorldDimensions dims = WorldPresets.createNormalWorldDimensions(registries);

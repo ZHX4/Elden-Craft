@@ -16,6 +16,9 @@ public final class Protocol {
 	public static final int OFF_STATE = 0x000100;
 	public static final int OFF_CONTROL = 0x000800;
 	public static final int OFF_CMD = 0x001000;
+	public static final int OFF_ENVIRONMENT = 0x000B00;
+	public static final int ENV_TIME = 1;
+	public static final int ENV_WEATHER = 2;
 
 	// ErmcHeader
 	public static final int H_MAGIC = 0x00;
@@ -170,8 +173,16 @@ public final class Protocol {
 
 	public static final int OFF_PLATFORMS = 0x310000;
 	public static final int MAX_PLATFORM_CELLS = 169;
+	public static final int PLATFORM_STATIC_CLEARANCE = 4;
 	public static final int PLATFORM_FLOATS = 7;
 	public static final int PLATFORM_CELL_SIZE = 32;
+
+	public static final int OFF_CONTACTS = 0x320000;
+	public static final int MAX_CONTACTS = 4096;
+	public static final int CONTACT_FLOATS = 7, CONTACT_SIZE = 32;
+	public static final int CONTACT_FLOOR = 1;
+	public static final int CONTACT_CLEAR = 4;
+	public static final int OFF_COLLISION_CONTROL = 0x350000;
 
 	// Damage ring (ErmcDamageQueue), relative to OFF_DAMAGE.
 	// ErmcDamage.amount is in Minecraft damage points, after all of Minecraft's own modifiers

@@ -23,9 +23,20 @@ def function(path, signature):
 client = ER / 'mc-bridge/src/client/java/dev/ermc/bridge/client/FramePassthrough.java'
 java = r'''
 import java.util.*;
+import java.nio.*;
+import java.nio.file.*;
+import java.nio.channels.*;
+import java.lang.invoke.*;
+import java.io.IOException;
 public class FrameSwitchTest {
-    static class Logger {void info(String s,Object... args) {}}
+    static class Logger {void info(String s,Object... args) {}void warn(String s,Object... args) {}}
     static final Logger LOG=new Logger();
+    static final VarHandle INT=MethodHandles.byteBufferViewVarHandle(int[].class,ByteOrder.LITTLE_ENDIAN);
+    static final VarHandle LONG=MethodHandles.byteBufferViewVarHandle(long[].class,ByteOrder.LITTLE_ENDIAN);
+    static final String PATH=System.getProperty("test.frames");
+    static final int MAGIC=0x524D484D,VERSION=3,SLOTS=3,HDR=0x100;
+    static final long SLOT_SIZE=HDR,FILE_SIZE=0x1000+SLOTS*SLOT_SIZE;
+    static MappedByteBuffer frames;
     static long statsAt, frameCounter;
     static int rendered,captures,published,waitingCapture,waitingHost,cur;
     static boolean worldCaptured,enabled=true,failed;
@@ -80,8 +91,18 @@ public class FrameSwitchTest {
 '''
 java += function(client, 'public static boolean wanted()') + '\n'
 java += function(client, 'public static void endFrame(Minecraft mc)') + '\n'
+java += function(client, 'private static boolean open()') + '\n'
 java += r'''
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
+        // A Minecraft restart must not reset IDs below the surviving host/GPU fences.
+        try(FileChannel file=FileChannel.open(Path.of(PATH),StandardOpenOption.CREATE,
+                StandardOpenOption.READ,StandardOpenOption.WRITE)) {
+            file.write(ByteBuffer.wrap(new byte[1]),FILE_SIZE-1);
+            MappedByteBuffer previous=file.map(FileChannel.MapMode.READ_WRITE,0,FILE_SIZE);
+            previous.order(ByteOrder.LITTLE_ENDIAN).putLong(0x10,12000L);
+        }
+        check(open() && frameCounter==12000L,"Resume IDs above the previous Minecraft session");
+        check(++frameCounter>frames.getLong(0x10),"First new frame must pass the host's freshness check");
         // F8 can occur before Overlay.onFrame has disabled the still-active overlay.
         Overlay.host=true;
         check(!wanted(),"F8 must immediately stop new captures and stale pose publication");
@@ -110,7 +131,8 @@ java += r'''
 (OUT / 'FrameSwitchTest.java').write_text(java, encoding='utf-8')
 jdk = next((ROOT / '.tools/java').glob('*/bin/java.exe')).parent
 subprocess.run([str(jdk / 'javac.exe'), '-d', str(OUT), str(OUT / 'FrameSwitchTest.java')], check=True)
-subprocess.run([str(jdk / 'java.exe'), '-cp', str(OUT), 'FrameSwitchTest'], check=True)
+subprocess.run([str(jdk / 'java.exe'), '-Dtest.frames='+str(OUT/'restart-frames.shm'),
+                '-cp', str(OUT), 'FrameSwitchTest'], check=True)
 
 native = r'''
 #include <cassert>
@@ -151,6 +173,17 @@ int main() {
     keyDown=false;handle_switching();foreground=2;keyDown=true;handle_switching();
     foreground=1;handle_switching();assert(shared.mcSwitchReq==1);
     keyDown=false;handle_switching();keyDown=true;handle_switching();assert(shared.mcSwitchReq==2);
+    // GLFW hides Minecraft and Windows focuses its owner while the game is stalled.
+    // The next native tick sees both the held key and the explicit host request.
+    keyDown=false;foreground=2;handle_switching();
+    foreground=1;keyDown=true;shared.hostFocusReq++;handle_switching();
+    for(int i=0;i<10;i++) handle_switching();
+    assert(shared.mcSwitchReq==2);
+    keyDown=false;handle_switching();keyDown=true;handle_switching();
+    assert(shared.mcSwitchReq==3);
+    // A released key at handoff must not swallow the next distinct press either.
+    keyDown=false;shared.hostFocusReq++;handle_switching();
+    keyDown=true;handle_switching();assert(shared.mcSwitchReq==4);
     auto* publication=(UINT64*)(data+0xA0);auto* ack=(UINT64*)(data+0x60);
     publication[0]=101;ready.value=101;gpu_acknowledge(100);assert(ack[0]==0);
     gpu_acknowledge(100,true);assert(ack[0]==101);
@@ -159,7 +192,7 @@ int main() {
     copies.value=9;gpu_acknowledge(100,true);assert(ack[1]==102 && g_gpuAckFence[1]==0);
     publication[2]=103;gpu_acknowledge(100,true);assert(ack[2]==0);
     ready.value=103;gpu_acknowledge(100,true);assert(ack[2]==103);
-    puts("PASS: held F8 handoff and safe GPU acknowledgements during pause");
+    puts("PASS: held and delayed F8 handoffs and safe GPU acknowledgements during pause");
 }
 '''
 (OUT / 'native.cpp').write_text(native, encoding='utf-8')

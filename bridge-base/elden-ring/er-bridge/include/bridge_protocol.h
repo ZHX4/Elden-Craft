@@ -28,6 +28,7 @@
 #define ERMC_OFF_STATE    0x000100u  /* ErmcGameState, written by ER          */
 #define ERMC_OFF_CONTROL  0x000800u  /* ErmcControl,   written by Minecraft    */
 #define ERMC_OFF_HUNTER   0x000A00u  /* ErmcHunterEvents, written by ER              */
+#define ERMC_OFF_ENVIRONMENT 0x000B00u /* Optional world controls, written by Minecraft */
 #define ERMC_OFF_CMD      0x001000u  /* ErmcCmdBlock,  debug/RE command mailbox */
 #define ERMC_OFF_CMD_RESP 0x002000u  /* command response payload                */
 #define ERMC_CMD_RESP_MAX (0x100000u - ERMC_OFF_CMD_RESP)
@@ -38,10 +39,40 @@
 #define ERMC_OFF_PLATFORMS 0x310000u /* Frame-rate verified moving floor cells near Steve */
 #define ERMC_MAX_PLATFORM_CELLS 169u
 
+/* Independent, bounded native contact sampling; never waits for terrain batches. */
+#define ERMC_OFF_CONTACTS 0x320000u
+#define ERMC_MAX_CONTACTS 4096u
+#define ERMC_CONTACT_FLOOR 1u
+#define ERMC_CONTACT_WALL 2u
+#define ERMC_CONTACT_CEILING 3u
+#define ERMC_CONTACT_CLEAR 4u /* Only the ray-verified air; never an entire block */
+typedef struct ErmcTerrainContact {
+    float min[3], max[3];
+    uint32_t kind, reserved;
+} ErmcTerrainContact;
+typedef struct ErmcTerrainContacts {
+    volatile uint32_t seq;
+    uint32_t count, zone, valid;
+    float origin[3];
+    float previousFeetY;
+    float previousFeetX, previousFeetZ; /* valid bit1: 40-byte header with full trajectory */
+    ErmcTerrainContact contacts[ERMC_MAX_CONTACTS];
+} ErmcTerrainContacts;
+
+/* Actual simulation feet, independent of delayed/interpolated frame poses. */
+#define ERMC_OFF_COLLISION_CONTROL 0x350000u
+typedef struct ErmcCollisionControl {
+    volatile uint32_t seq;
+    uint32_t flags, zone;
+    float previousFeetX; /* flags bit1: full previous simulation feet */
+    float feet[3], previousFeetY;
+    float velocity[3], previousFeetZ;
+} ErmcCollisionControl;
+
 typedef struct ErmcPlatformCell {
     float x, z, floor, previousFloor;
     float clearLow, clearHigh;
-    uint32_t flags, reserved; /* bit0: floor present; bit1: old floor independently verified empty */
+    uint32_t flags, reserved; /* bit0: floor present; bit1: old floor verified empty; bit2: static landing/clearance */
 } ErmcPlatformCell;
 typedef struct ErmcPlatformTable {
     volatile uint32_t seq;
@@ -50,6 +81,17 @@ typedef struct ErmcPlatformTable {
 } ErmcPlatformTable;
 
 #pragma pack(push, 4)
+
+#define ERMC_ENV_TIME 1u
+#define ERMC_ENV_WEATHER 2u
+typedef struct ErmcEnvironment {
+    volatile uint32_t seq;
+    uint32_t flags;
+    uint32_t timeRevision;
+    uint32_t dayTicks;           /* Minecraft: 0 = 06:00, 6000 = noon */
+    uint32_t weatherRevision;
+    uint32_t weather;            /* 0 clear, 1 rain, 2 thunder */
+} ErmcEnvironment;
 
 typedef struct ErmcHeader {
     uint32_t magic;               /* 0x00 */
@@ -388,5 +430,9 @@ static_assert(ERMC_OFF_DAMAGE + sizeof(ErmcDamageQueue) <= ERMC_OFF_PASSAGES, "d
 static_assert(sizeof(ErmcPassage) == 0x20, "passage size");
 static_assert(ERMC_OFF_PASSAGES + sizeof(ErmcPassageTable) <= ERMC_OFF_PLATFORMS, "passages fit");
 static_assert(sizeof(ErmcPlatformCell) == 32, "platform cell size");
-static_assert(ERMC_OFF_PLATFORMS + sizeof(ErmcPlatformTable) <= ERMC_SHM_SIZE, "platform table fits");
+static_assert(ERMC_OFF_PLATFORMS + sizeof(ErmcPlatformTable) <= ERMC_OFF_CONTACTS, "platform table fits");
+static_assert(sizeof(ErmcTerrainContact) == 32, "terrain contact size");
+static_assert(ERMC_OFF_CONTACTS + sizeof(ErmcTerrainContacts) <= ERMC_OFF_COLLISION_CONTROL, "contacts fit");
+static_assert(sizeof(ErmcCollisionControl) == 48, "collision control size");
+static_assert(ERMC_OFF_COLLISION_CONTROL + sizeof(ErmcCollisionControl) <= ERMC_SHM_SIZE, "collision control fits");
 #endif

@@ -8,6 +8,7 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -54,10 +55,17 @@ public class ErBridgeMod implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		ErBridgeEntities.init();
+		ServerLifecycleEvents.SERVER_STARTING.register(server -> TerrainRegeneration.reset());
 		ServerLifecycleEvents.SERVER_STARTED.register(TerrainManager::onServerStarted);
 		ServerLifecycleEvents.SERVER_STARTED.register(LifeBridge::onServerStarted);  // after TerrainManager: needs isBridgeWorld()
+		ServerLifecycleEvents.SERVER_STARTED.register(WorldEnvironmentBridge::onServerStarted);
+		ServerLifecycleEvents.SERVER_STOPPED.register(WorldEnvironmentBridge::reset);
+		ServerChunkEvents.CHUNK_LOAD.register(BridgeBiomes::onChunkLoad);
+		ServerChunkEvents.CHUNK_LOAD.register(TerrainRegeneration::onChunkLoad);
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
 			TerrainManager.reset();
+			NativeTerrainCollision.reset();
+			TerrainRegeneration.reset();
 			EntityBridge.reset();
 			CombatBridge.reset();
 		});
@@ -65,6 +73,7 @@ public class ErBridgeMod implements ModInitializer {
 		ServerTickEvents.END_SERVER_TICK.register(EntityBridge::onServerTick);
 		ServerTickEvents.END_SERVER_TICK.register(CombatBridge::onServerTick);
 		ServerTickEvents.END_SERVER_TICK.register(LifeBridge::onServerTick);
+		ServerTickEvents.END_SERVER_TICK.register(WorldEnvironmentBridge::onServerTick);
 		ServerLivingEntityEvents.AFTER_DEATH.register(LifeBridge::onDeath);
 		ServerPlayerEvents.AFTER_RESPAWN.register(LifeBridge::onRespawn);
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> TerrainManager.onJoin(server, handler.player));

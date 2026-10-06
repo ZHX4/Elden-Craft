@@ -63,6 +63,11 @@ public final class ErLink {
 		return lastHeartbeat;
 	}
 
+	/** Identifies the connected host's windows without relying on their titles. */
+	public synchronized int hostProcessId() {
+		return shm != null ? shm.hostProcessId() : 0;
+	}
+
 	public synchronized boolean alive() {
 		return shm != null && lastHeartbeatChange > 0 && System.currentTimeMillis() - lastHeartbeatChange < ALIVE_TIMEOUT_MS;
 	}
@@ -79,6 +84,21 @@ public final class ErLink {
 	public synchronized void writeControl(ControlState c) {
 		if (shm != null) {
 			shm.writeControl(c);
+		}
+	}
+
+	public synchronized void writeCollision(int flags, int zone, float[] feet, float previousY, float[] velocity) {
+		if (shm != null) shm.writeCollision(flags, zone, feet, previousY, velocity);
+	}
+
+	public synchronized void writeCollision(int flags, int zone, float[] feet, float previousX, float previousY, float previousZ, float[] velocity) {
+		if (shm != null) shm.writeCollision(flags, zone, feet, previousX, previousY, previousZ, velocity);
+	}
+
+	public synchronized void writeEnvironment(int flags, int timeRevision, int dayTicks,
+			int weatherRevision, int weather) {
+		if (shm != null) {
+			shm.writeEnvironment(flags, timeRevision, dayTicks, weatherRevision, weather);
 		}
 	}
 
@@ -115,6 +135,10 @@ public final class ErLink {
 
 	public synchronized int readPlatforms(float[] out, int[] metadata) {
 		return shm != null && alive() ? shm.readPlatforms(out, metadata) : -1;
+	}
+
+	public synchronized int readContacts(float[] out, float[] origin, int[] metadata, int previousSequence) {
+		return shm != null && alive() ? shm.readContacts(out, origin, metadata, previousSequence) : -1;
 	}
 
 	public synchronized boolean pushDamage(long id, float amount, float x, float y, float z, int flags) {

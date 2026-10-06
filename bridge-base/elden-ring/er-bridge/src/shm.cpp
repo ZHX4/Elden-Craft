@@ -63,6 +63,8 @@ ErmcHunterEvents* shm_hunter() { return (ErmcHunterEvents*)(g_base + ERMC_OFF_HU
 ErmcEntityTable* shm_entities() { return (ErmcEntityTable*)(g_base + ERMC_OFF_ENTITIES); }
 ErmcPassageTable* shm_passages() { return (ErmcPassageTable*)(g_base + ERMC_OFF_PASSAGES); }
 ErmcPlatformTable* shm_platforms() { return (ErmcPlatformTable*)(g_base + ERMC_OFF_PLATFORMS); }
+ErmcTerrainContacts* shm_contacts() { return (ErmcTerrainContacts*)(g_base + ERMC_OFF_CONTACTS); }
+ErmcCollisionControl* shm_collision_control() { return (ErmcCollisionControl*)(g_base + ERMC_OFF_COLLISION_CONTROL); }
 ErmcDamageQueue* shm_damage() { return (ErmcDamageQueue*)(g_base + ERMC_OFF_DAMAGE); }
 
 // x86 (and Rosetta's emulation of it) is TSO: stores are not reordered with other stores

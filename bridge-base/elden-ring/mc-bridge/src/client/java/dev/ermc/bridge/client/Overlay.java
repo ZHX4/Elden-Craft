@@ -6,6 +6,7 @@ import dev.ermc.bridge.link.Protocol;
 import dev.ermc.bridge.TerrainManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.gui.screens.ReceivingLevelScreen;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWNativeCocoa;
 import org.lwjgl.system.JNI;
@@ -15,7 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Overlay mode: Minecraft's window becomes a borderless, always-on-top, transparent layer
+ * Overlay mode: Minecraft's window becomes a borderless, transparent layer above the host
  * glued to the host game's window. Only Minecraft's own content (blocks, entities, hand, HUD)
  * is opaque; everywhere else the host game shows through.
  *
@@ -43,6 +44,8 @@ public final class Overlay {
 	public static float spinDegPerSec;
 	private static long lastSpinNs;
 	private static long lastWantMs;
+	private static boolean hostPreparationPending = true;
+	private static boolean focusPending;
 	private static final GameState STATE = new GameState();
 
 	public static boolean active() {
@@ -92,8 +95,10 @@ public final class Overlay {
 			mc.pauseGame(false);
 		}
 		mc.mouseHandler.releaseMouse();
-		GLFW.glfwHideWindow(window);
+		// Hiding an owned window can immediately focus Elden Ring. Publish the
+		// handoff first so its next tick cannot treat this F8 as a return press.
 		ErLink.get().requestHostFocus();
+		GLFW.glfwHideWindow(window);
 		LOG.info("Control -> Elden Ring");
 	}
 
@@ -103,6 +108,10 @@ public final class Overlay {
 			return;
 		}
 		hostMode = false;
+		hostPreparationPending = true;
+		if (GLFW.glfwGetWindowAttrib(window, GLFW.GLFW_ICONIFIED) == GLFW.GLFW_TRUE) {
+			GLFW.glfwRestoreWindow(window);
+		}
 		GLFW.glfwShowWindow(window);
 		GLFW.glfwFocusWindow(window);
 		if (mc.screen instanceof PauseScreen) {
@@ -131,6 +140,7 @@ public final class Overlay {
 
 	public static void onWindowCreated(long handle) {
 		window = handle;
+		hostPreparationPending = true;
 		if (handle == 0L) {
 			transparentWindow = false;
 		}
@@ -168,16 +178,25 @@ public final class Overlay {
 			switchToMc(mc);
 		}
 		boolean haveState = alive && link.snapshot(STATE);
-		// Only take over once a hunter is actually in the world, so the host game's title screen and
-		// menus stay usable. Short gaps (area loads) don't toggle the window.
+		if (hostPreparationPending && !hostMode && transparentWindow && window != 0L
+				&& Platform.get() == Platform.WINDOWS) {
+			// A minimized host may stop its heartbeat. Prepare it once at startup/F8 return,
+			// independently of state polling; later Alt+Tab does not keep restoring it.
+			hostPreparationPending = !WindowsOverlay.prepareHostForOverlay(link.hostProcessId());
+		}
+		boolean haveClientWorld = mc.level != null && mc.player != null && TerrainManager.isBridgeWorld();
+		boolean haveHostWindow = Platform.get() == Platform.WINDOWS && WindowsOverlay.hostAvailable(link.hostProcessId());
+		// Remember the last valid hunter state for short area-load gaps.
 		long now = System.currentTimeMillis();
 		if (haveState && STATE.has(Protocol.STATE_PLAYER_VALID)) {
 			lastInWorldMs = now;
 		}
-		// A death or loading screen within a session keeps the overlay (drawing nothing), so the
-		// window doesn't jump back and forth; only a longer absence (title screen) hands it back.
-		boolean hostBusyNow = haveState && STATE.has(Protocol.STATE_HOST_BUSY);
-		boolean inWorld = haveState && (now - lastInWorldMs < 3000 || hostBusyNow);
+		boolean hostBusyNow = !haveState || !STATE.has(Protocol.STATE_PLAYER_VALID) || STATE.has(Protocol.STATE_HOST_BUSY);
+		// Loading can stop the heartbeat for several seconds. Keep the bridge world
+		// transparent while its host window exists, including before the first save
+		// finishes loading; never expose the ordinary void world during that gap.
+		boolean inWorld = (haveState && (now - lastInWorldMs < 3000 || STATE.has(Protocol.STATE_HOST_BUSY)))
+				|| (haveClientWorld && haveHostWindow);
 		boolean want = transparentWindow && window != 0L && inWorld && !hostMode
 				&& GLFW.glfwGetWindowMonitor(window) == 0L;
 		if (want) {
@@ -192,7 +211,7 @@ public final class Overlay {
 		if (active && STATE.has(Protocol.STATE_WINDOW_VALID)) {
 			follow(STATE.winX, STATE.winY, STATE.winW, STATE.winH);
 		}
-		boolean nowBusy = active && (hostBusyNow || !TerrainManager.recallSettled(400));
+		boolean nowBusy = active && (hostBusyNow || !haveClientWorld || !TerrainManager.recallSettled(400));
 		if (nowBusy && mc.screen instanceof PauseScreen) {
 			// Nothing is drawn while Elden Ring shows its own screen, so a pause menu would be
 			// invisible yet take the clicks meant for Elden Ring.
@@ -207,17 +226,35 @@ public final class Overlay {
 			CameraSync.suspend();
 		}
 		if (Platform.get() == Platform.WINDOWS && window != 0L) {
-			WindowsOverlay.update(window, active && !hostMode, busy || FramePassthrough.activeInHost());
+			WindowsOverlay.updateCursor(mc);
+			WindowsOverlay.update(window, active && !hostMode, busy || FramePassthrough.activeInHost(),
+					link.hostProcessId());
 		}
+		if (active && focusPending && haveClientWorld && readyToFocus(mc, hostBusyNow) && !busy) {
+			// Show and focus only after ownership, geometry and opacity have been applied.
+			if (Platform.get() == Platform.WINDOWS) {
+				focusPending = !WindowsOverlay.showAboveHost(window, link.hostProcessId());
+			} else {
+				GLFW.glfwShowWindow(window);
+				GLFW.glfwFocusWindow(window);
+				focusPending = false;
+			}
+		}
+	}
+
+	private static boolean readyToFocus(Minecraft mc, boolean hostBusyNow) {
+		return !hostBusyNow && mc.getOverlay() == null && !(mc.screen instanceof ReceivingLevelScreen)
+				&& mc.level.hasChunkAt(mc.player.blockPosition()) && TerrainManager.recallSettled(400)
+				// A loaded void chunk alone does not mean Elden Ring is showing our frame.
+				&& (Platform.get() != Platform.WINDOWS || !FramePassthrough.enabled()
+						|| CameraSync.mode() != CameraSync.Mode.DRIVE_HOST || FramePassthrough.activeInHost());
 	}
 
 	private static void setActive(Minecraft mc, boolean on) {
 		active = on;
+		focusPending = on;
 		LOG.info("Overlay mode {}", on ? "ON" : "OFF");
 		if (on) {
-			// Taking over (startup, back from the host game with F8, after a loading screen):
-			// its hunter is where the player really is, so Steve starts there, and nothing
-			// drives its camera or hunter until he has been moved.
 			TerrainManager.requestRecall();
 			int[] x = new int[1], y = new int[1], w = new int[1], h = new int[1];
 			GLFW.glfwGetWindowPos(window, x, y);
@@ -227,12 +264,14 @@ public final class Overlay {
 			savedW = w[0];
 			savedH = h[0];
 			GLFW.glfwSetWindowAttrib(window, GLFW.GLFW_DECORATED, GLFW.GLFW_FALSE);
-			GLFW.glfwSetWindowAttrib(window, GLFW.GLFW_FLOATING, GLFW.GLFW_TRUE);
+			// Windows keeps us above only Elden Ring through window ownership, so Alt+Tab
+			// can bring other applications above both games without waiting for another frame.
+			GLFW.glfwSetWindowAttrib(window, GLFW.GLFW_FLOATING,
+					Platform.get() == Platform.WINDOWS ? GLFW.GLFW_FALSE : GLFW.GLFW_TRUE);
 			setShadow(false);
 			// When the host game draws our frames, this window is fully transparent; macOS would
 			// then let clicks fall through to it unless told otherwise.
 			objcBool("setIgnoresMouseEvents:", false);
-			GLFW.glfwFocusWindow(window);
 			appliedX = Integer.MIN_VALUE;
 		} else if (!hostMode) {
 			GLFW.glfwSetWindowAttrib(window, GLFW.GLFW_FLOATING, GLFW.GLFW_FALSE);

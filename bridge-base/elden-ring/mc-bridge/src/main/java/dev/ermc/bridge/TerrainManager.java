@@ -115,6 +115,7 @@ public final class TerrainManager {
 	private static final java.util.Set<Long> WAITING_DETAIL = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	private static final java.util.Map<java.util.UUID, Vec3> LAST_POSITIONS = new java.util.HashMap<>();
 	private static boolean preferBackground;
+	private static boolean preferTravel = true;
 	private static long coarseBatches, lastBatchMs, maxBatchMs;
 	private static final java.util.Map<java.util.UUID, MovingPlatformMotion> PLATFORM_MOTION = new java.util.HashMap<>();
 	private static final LongOpenHashSet MOVING_COLUMNS = new LongOpenHashSet();
@@ -141,6 +142,8 @@ public final class TerrainManager {
 
 	public static void reset() {
 		TerrainDetailManager.reset();
+		TerrainTravelClearance.reset();
+		preferTravel = true;
 		bridgeWorld = false;
 		WAITING_DETAIL.clear();
 		LAST_POSITIONS.clear();
@@ -239,6 +242,7 @@ public final class TerrainManager {
 	}
 
 	private static void invalidate(long key) {
+		TerrainTravelClearance.invalidate();
 		if (pendingSeq >= 0 && BATCH_KEYS.contains(key)) INVALIDATED_PENDING.add(key);
 		COLUMNS.remove(key);
 		WAITING_DETAIL.remove(key);
@@ -271,7 +275,8 @@ public final class TerrainManager {
 		}
 		return "movement normal; nearby sampled " + sampled + " awaitingRefresh " + missing + " waitingDetail " + WAITING_DETAIL.size()
 			+ " ahead " + ahead + "batches " + coarseBatches + " last/max ms " + lastBatchMs + "/" + maxBatchMs
-			+ " coarsePending " + (pendingSeq < 0 ? 0 : now - pendingSince) + " detailPending " + TerrainDetailManager.busy();
+			+ " coarsePending " + (pendingSeq < 0 ? 0 : now - pendingSince) + " detailPending " + TerrainDetailManager.busy()
+			+ " " + TerrainTravelClearance.describe();
 	}
 
 	public static void onServerStarted(MinecraftServer server) {
@@ -281,10 +286,7 @@ public final class TerrainManager {
 			return;
 		}
 		ServerLevel overworld = server.overworld();
-		// Midnight, for good: undead mobs don't burn, so they can fight Elden Ring's enemies. Minecraft
-		// still renders full daylight (ClientLevelMixin); Elden Ring's light is applied on top.
-		overworld.setDayTime(18000);
-		server.getGameRules().getRule(net.minecraft.world.level.GameRules.RULE_DAYLIGHT).set(false, server);
+		// Keep the saved clock and daylight gamerule for WorldEnvironmentBridge.
 		server.getGameRules().getRule(net.minecraft.world.level.GameRules.RULE_DOINSOMNIA).set(false, server);
 		// One life for both games: dying costs the runes in Elden Ring, not the Minecraft inventory,
 		// which would be left behind in an area the story may never return to.
@@ -367,6 +369,7 @@ public final class TerrainManager {
 			COLUMNS.clear();
 			WAITING_DETAIL.clear();
 			TerrainDetailManager.reset();
+			TerrainTravelClearance.invalidate();
 			pendingSeq = -1;
 			PENDING_COLUMNS.clear();
 			LOG.info("Terrain reset ({})", describeSettings());
@@ -376,6 +379,8 @@ public final class TerrainManager {
 		collectResults(level, map);
 		resampleStruck();
 		TerrainDetailManager.collectResults(level, map);
+		TerrainTravelClearance.collect(level, map);
+		TerrainDetailManager.discover(level, players);
 		List<Forecast> forecasts = new ArrayList<>();
 		for (ServerPlayer player : players) {
 			Vec3 previous = LAST_POSITIONS.put(player.getUUID(), player.position());
@@ -384,16 +389,21 @@ public final class TerrainManager {
 			double[] ahead = TerrainPrefetch.ahead(player.getX(), player.getZ(), velocity.x, velocity.z, look.x, look.z);
 			forecasts.add(new Forecast(player, ahead[0], ahead[1]));
 		}
-		if (pendingSeq < 0 && !TerrainDetailManager.busy() && !players.isEmpty()) {
-			// No refinement batch may postpone unverified terrain under or ahead of a player.
-			int n = prepareRays(map, players, forecasts, true);
+		if (pendingSeq < 0 && !TerrainDetailManager.busy() && !TerrainTravelClearance.busy() && !players.isEmpty()) {
+			// Establish footing first, then alternate local refinement and broader
+			// generation. Periodic refresh of 200 distant columns cannot starve
+			// the collision that is blocking the player's next step.
+			int n = prepareFooting(map, players);
 			if (n > 0) submitRays(map, n);
+			else if (preferTravel && TerrainTravelClearance.submit(map, players)) preferTravel = false;
 			else if (!preferBackground && TerrainDetailManager.submit(map, players)) preferBackground = true;
 			else {
-				n = prepareRays(map, players, forecasts, false);
+				n = prepareRays(map, players, forecasts, true);
+				if (n == 0) n = prepareRays(map, players, forecasts, false);
 				if (n > 0) { submitRays(map, n); preferBackground = false; }
 				else if (TerrainDetailManager.submit(map, players)) preferBackground = true;
 			}
+			if (!TerrainTravelClearance.busy()) preferTravel = true;
 		}
 		logAttrStats();
 	}
@@ -500,6 +510,17 @@ public final class TerrainManager {
 				n = sampleAround(map, m.getX(), m.getY(), m.getZ(), MOB_SAMPLE_RADIUS, n, false, m.getX(), m.getZ());
 			}
 		}
+		return n;
+	}
+
+	private static int prepareFooting(CoordMap.Mapping map, List<ServerPlayer> players) {
+		PENDING_COLUMNS.clear();
+		INVALIDATED_PENDING.clear();
+		BATCH_KEYS.clear();
+		int n = 0;
+		for (ServerPlayer player : players)
+			n = sampleAround(map, player.getX(), player.getY(), player.getZ(), 2, n,
+				true, player.getX(), player.getZ());
 		return n;
 	}
 
@@ -670,12 +691,17 @@ public final class TerrainManager {
 				if (top != Integer.MIN_VALUE) {
 					for (int y = bottom; y <= top; y++) {
 						BlockState state = !obstacle && y == topBlock ? terrain.setValue(TerrainBlock.HEIGHT, height) : terrain;
+						if (needsDetail && TerrainDetailManager.preserveVerified(level, new BlockPos(x, y, z))) continue;
 						if (needsDetail && occupied(level, x, y, z, state)) {
 							// Keep the player's existing support and body space until the
 							// native subcells arrive; a newly discovered wall must not entomb them.
 							WAITING_DETAIL.add(key);
 							continue;
 						}
+						// A change in ray origin height is not a closed door. Keep
+						// measured passages while their new local sample is queued.
+						if (needsDetail && old.sample() != null && old.obstacle() == obstacle
+							&& level.getBlockState(new BlockPos(x, y, z)).is(ErBridgeMod.TERRAIN_DETAIL)) continue;
 						setTerrain(level, x, y, z, state);
 					}
 				}

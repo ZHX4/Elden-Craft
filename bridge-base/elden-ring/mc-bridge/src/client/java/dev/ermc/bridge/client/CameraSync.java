@@ -115,7 +115,8 @@ public final class CameraSync {
 		Minecraft mc = Minecraft.getInstance();
 		CoordMap.Mapping map = CoordMap.get();
 		boolean haveState = ErLink.get().snapshot(STATE);
-		if (!Overlay.active() || map == null || !haveState || (mode == Mode.DRIVE_HOST && !ready(mc, map))) {
+		if (!Overlay.active() || Overlay.hostMode() || Overlay.hostBusy() || map == null || !haveState
+				|| (mode == Mode.DRIVE_HOST && !ready(mc, map))) {
 			releaseHostCamera();
 			fov = mc.options.fov().get();
 			driving = false;

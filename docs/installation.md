@@ -3,7 +3,7 @@
 [Back to Minecraft Ring](../README.md)
 
 This guide describes the current source-build workflow for Minecraft Ring
-0.2.0. It targets Windows x64, Elden Ring App Ver. 1.17.1 (`eldenring.exe`
+0.3.0. It targets Windows x64, Elden Ring App Ver. 1.17.1 (`eldenring.exe`
 2.7.1.0), and Minecraft Java Edition 1.21.1.
 
 ## Toolchains
@@ -50,7 +50,7 @@ $env:GRADLE_USER_HOME = Join-Path (Get-Location) '.tools\gradle-home'
 ```
 
 The remapped mod is written to
-`bridge-base/elden-ring/mc-bridge/build/libs/er-bridge-0.2.0.jar`.
+`bridge-base/elden-ring/mc-bridge/build/libs/er-bridge-0.3.0.jar`.
 After dependencies are cached, add `--offline` for an offline build.
 
 ## Install and launch

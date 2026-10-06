@@ -30,6 +30,10 @@
 /tools/*
 !/tools/*.py
 /tools/adapt_windows.py
+# Local reverse-engineering helpers depend on an unpublished erctl module.
+/tools/read_poke_params.py
+/tools/inspect_bullets.py
+/tools/clear_stale_pokes.py
 !/bridge-base/
 /bridge-base/*
 !/bridge-base/LICENSE
@@ -59,6 +63,10 @@
 **/.gradle/
 **/.idea/
 **/.vscode/
+**/.aws/
+**/.ssh/
+**/.codex/
+**/.agents/
 **/__pycache__/
 **/node_modules/
 **/run/
@@ -76,6 +84,17 @@
 *.pdb
 *.shm
 *.dmp
+*.bin
+*.raw
+*.sl2
+*.co2
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.pcap
+*.pcapng
 *.zip
 *.7z
 *.jar

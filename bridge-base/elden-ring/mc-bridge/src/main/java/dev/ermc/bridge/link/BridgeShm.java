@@ -58,6 +58,10 @@ public final class BridgeShm {
 		return (long) LONG.getAcquire(buf, Protocol.H_HOST_HEARTBEAT);
 	}
 
+	public int hostProcessId() {
+		return (int) INT.getAcquire(buf, Protocol.H_HOST_PID);
+	}
+
 	public long hostStartMs() {
 		return (long) LONG.getAcquire(buf, Protocol.H_HOST_START);
 	}
@@ -117,6 +121,20 @@ public final class BridgeShm {
 		LONG.setRelease(buf, Protocol.H_MC_HEARTBEAT, v + 1);
 	}
 
+	public void writeEnvironment(int flags, int timeRevision, int dayTicks,
+			int weatherRevision, int weather) {
+		int base = Protocol.OFF_ENVIRONMENT;
+		int seq = buf.getInt(base) & ~1;
+		INT.setOpaque(buf, base, seq + 1);
+		VarHandle.storeStoreFence();
+		buf.putInt(base + 4, flags);
+		buf.putInt(base + 8, timeRevision);
+		buf.putInt(base + 12, dayTicks);
+		buf.putInt(base + 16, weatherRevision);
+		buf.putInt(base + 20, weather);
+		INT.setRelease(buf, base, seq + 2);
+	}
+
 	/** Seqlock read of the host game's state. Returns false if nothing consistent was published yet. */
 	public boolean readState(GameState out) {
 		int base = Protocol.OFF_STATE;
@@ -158,6 +176,23 @@ public final class BridgeShm {
 		buf.putInt(base + Protocol.C_SUPPORT_EPOCH, c.supportEpoch);
 		buf.putFloat(base + Protocol.C_SUPPORT_TRAVEL_Y, c.supportTravelY);
 		INT.setRelease(buf, base + Protocol.C_SEQ, s + 2);
+	}
+
+	/** Simulation feet must not wait for frame capture, fences or camera interpolation. */
+	public void writeCollision(int flags, int zone, float[] feet, float previousY, float[] velocity) {
+		writeCollision(flags, zone, feet, feet[0], previousY, feet[2], velocity);
+	}
+
+	public void writeCollision(int flags, int zone, float[] feet, float previousX, float previousY, float previousZ, float[] velocity) {
+		int base = Protocol.OFF_COLLISION_CONTROL;
+		int seq = (int) INT.getOpaque(buf, base) & ~1;
+		INT.setOpaque(buf, base, seq + 1);
+		VarHandle.releaseFence();
+		buf.putInt(base + 4, flags == 0 ? 0 : flags | 2); buf.putInt(base + 8, zone);
+		buf.putFloat(base + 12, previousX); buf.putFloat(base + 44, previousZ);
+		putFloats(base + 16, feet); buf.putFloat(base + 28, previousY);
+		putFloats(base + 32, velocity);
+		INT.setRelease(buf, base, seq + 2);
 	}
 
 	// -- ray queries -------------------------------------------------------------------------
@@ -296,6 +331,36 @@ public final class BridgeShm {
 			if ((int) INT.getAcquire(buf, base + Protocol.P_SEQ) == s1) {
 				return count;
 			}
+		}
+		return -1;
+	}
+
+	/** Complete native contacts: min xyz, max xyz, kind; metadata zone, seq. */
+	public int readContacts(float[] out, float[] origin, int[] metadata, int previousSequence) {
+		int base = Protocol.OFF_CONTACTS;
+		for (int tries = 0; tries < 8; tries++) {
+			int seq = (int) INT.getAcquire(buf, base);
+			if (seq == previousSequence && seq != 0) return -2;
+			if (seq == 0 || (seq & 1) != 0) continue;
+			int flags = buf.getInt(base + 12);
+			if ((flags & 1) == 0) return -1;
+			int header = (flags & 2) != 0 ? 40 : 32;
+			int count = buf.getInt(base + 4);
+			if (count < 0 || count > Protocol.MAX_CONTACTS || count * Protocol.CONTACT_FLOATS > out.length) return -1;
+			metadata[0] = buf.getInt(base + 8); metadata[1] = seq;
+			if (metadata.length >= 3) metadata[2] = flags;
+			for (int a = 0; a < 4; a++) origin[a] = buf.getFloat(base + 16 + a * 4);
+			if (origin.length >= 6) {
+				origin[4] = header == 40 ? buf.getFloat(base + 32) : origin[0];
+				origin[5] = header == 40 ? buf.getFloat(base + 36) : origin[2];
+			}
+			for (int i = 0; i < count; i++) {
+				int entry = base + header + i * Protocol.CONTACT_SIZE;
+				for (int a = 0; a < 6; a++) out[i * Protocol.CONTACT_FLOATS + a] = buf.getFloat(entry + a * 4);
+				out[i * Protocol.CONTACT_FLOATS + 6] = buf.getInt(entry + 24);
+			}
+			VarHandle.acquireFence();
+			if ((int) INT.getAcquire(buf, base) == seq) return count;
 		}
 		return -1;
 	}

@@ -9,8 +9,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * Elden Ring decides how bright things are (the compositor relights Minecraft's pixels from
- * its frame), so Minecraft itself always renders with full daylight. The bridge world is kept
- * at midnight so undead mobs don't burn; without this they would also look like midnight.
+ * its frame), so Minecraft itself renders with full daylight before host relighting.
+ * The actual world clock remains synchronized through WorldEnvironmentBridge.
  */
 @Mixin(ClientLevel.class)
 public abstract class ClientLevelMixin {

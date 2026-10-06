@@ -11,6 +11,7 @@
 		"GuiMixin",
 		"LevelRendererMixin",
 		"MinecraftMixin",
+		"PlayerPositionPacketMixin",
 		"RenderSystemMixin",
 		"RenderTargetMixin",
 		"ScreenMixin",

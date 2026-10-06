@@ -176,6 +176,9 @@ public final class FramePassthrough {
 			}
 			// Invalidate old sessions before advertising the larger slot layout.
 			INT.setRelease(frames, 0, 0);
+			// The host and its shared GPU fences may outlive a Minecraft restart.
+			// New captures must be newer than the last frame they have consumed.
+			frameCounter = Math.max(frameCounter, (long) LONG.getAcquire(frames, 0x10));
 			for (int slot = 0; slot < SLOTS; slot++) {
 				int base = (int) (0x1000 + slot * SLOT_SIZE);
 				for (int i = 0; i < HDR; i++) frames.put(base + i, (byte) 0);

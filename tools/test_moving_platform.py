@@ -74,11 +74,23 @@ public class PlatformTest {
         check(motion.update(true,5,0,11,11,true,false,5550).dy()==0,"Walking up a static step is not lift motion");
         check(motion.update(false,5,1,12,11,true,false,5600).dy()==0,"No movement without verified native support");
         var boarding=new MovingPlatformMotion();
-        var firstLanding=boarding.update(true,12,0,10.3,10,false,false,-.3,1000);
+        var firstLanding=boarding.update(true,12,.1,10.3,10,false,false,-.3,1000);
         check(firstLanding.landed() && firstLanding.moving() && firstLanding.dy()>.29,"Catch a rising platform on the first airborne contact sample");
-        check(boarding.update(true,12,.17,10.47,MovingPlatformMotion.collisionHeight(10.3),true,false,1050).moving(),"Continue riding after the initial catch");
+        check(boarding.update(true,12,.27,10.47,MovingPlatformMotion.collisionHeight(10.3),true,false,1050).moving(),"Continue riding after the initial catch");
         var jumpingAway=new MovingPlatformMotion();
         check(!jumpingAway.update(true,13,0,10,10.1,false,false,.3,1000).landed(),"Do not catch a new upward jump above a floor");
+        var walking=new MovingPlatformMotion();
+        for(int i=0;i<120;i++) {
+            double floor=10+i*.012,feetOnSlope=floor-.09;
+            var step=walking.update(true,100+i,0,floor,feetOnSlope,true,false,1000+i*50);
+            check(step.dy()==0 && !step.landed() && !step.moving(),"Static slope corners must never grab walking or sprinting players");
+        }
+        var tinyNoise=new MovingPlatformMotion();
+        tinyNoise.update(true,200,0,10.1,10,true,false,1000);
+        check(tinyNoise.update(true,200,.00003,10.15,10,true,false,1050).dy()==0,
+            "Floating-point support noise must not snap the player's feet on static ground");
+        check(!new MovingPlatformMotion().update(true,201,0,10.3,10,false,false,-.3,1000).landed(),
+            "An airborne static-floor contact must use Minecraft collision instead of platform snapping");
         System.out.println("PASS: full fast rides, delayed ticks, ascent, descent, settling, jumps, flight and static stairs");
     }
 }
@@ -101,16 +113,20 @@ native = r'''
 #include <cstdint>
 #include <cmath>
 #include <cstdio>
+#include "support_surface.h"
+#include <cstring>
+#include <initializer_list>
 using std::fabsf;
 constexpr uint32_t ERMC_CTRL_GROUNDED=256,ERMC_CTRL_FLYING=512,kTerrainRayFilter=0x5d;
 struct ErmcControl {uint32_t flags=256;float hunterPos[3]={0,10,0};uint32_t supportEpoch=0;float supportTravelY=0;};
 struct ErmcRayHit {uint32_t hit=0;float pos[3]={};};
 bool g_supportValid=false;uint32_t g_supportEpoch=0;float g_supportTravelY=0,g_supportPos[3]={},g_supportRayFloor=0;uint64_t g_supportAtMs=0;
-uint64_t clockMs=1000;float floorY=10,slope=0;bool haveFloor=true,stairs=false,edge=false,railing=false;
+uint64_t clockMs=1000;float floorY=10,slope=0,ceilingY=0;bool haveFloor=true,stairs=false,edge=false,railing=false;
 uint64_t now_ms(){return clockMs;}uint32_t GetTickCount(){return (uint32_t)clockMs;}
 void log(const char*,...) {}
 bool raycast(const float* s,const float* e,uint32_t,void*,ErmcRayHit* out) {
     float y=floorY+(stairs && s[0]>1 ? 1:0)+slope*s[0]+(railing && s[0]>.1f ? .4f:0);
+    if(ceilingY!=0 && ceilingY>y && s[1]>=ceilingY && e[1]<=ceilingY)y=ceilingY;
     out->hit=haveFloor && !(edge && s[0]>.1f) && s[1]>=y && e[1]<=y;
     out->pos[0]=s[0];out->pos[1]=y;out->pos[2]=s[2];return out->hit;
 }
@@ -120,6 +136,18 @@ native += r'''
 int main() {
     ErmcControl c;update_support(c,true,nullptr);
     assert(g_supportValid && g_supportTravelY==0);
+    // Replay the static floor/ceiling alias recorded in the user's run.
+    floorY=424.046f;ceilingY=427.495f;c.hunterPos[1]=floorY;
+    g_supportValid=false;clockMs+=50;update_support(c,true,nullptr);
+    for(uint64_t dt : {168u,220u,248u,296u,648u}) {
+        c.supportEpoch=g_supportEpoch;c.supportTravelY=g_supportTravelY;
+        clockMs+=dt;update_support(c,true,nullptr);
+        assert(!g_supportValid || fabsf(g_supportTravelY)<.001f);
+        if(!g_supportValid){clockMs+=50;update_support(c,true,nullptr);}
+    }
+    assert(g_supportValid && fabsf(g_supportRayFloor-floorY)<.001f);
+    ceilingY=0;floorY=10;c.hunterPos[1]=10;g_supportValid=false;
+    clockMs+=50;update_support(c,true,nullptr);
     c.supportEpoch=g_supportEpoch;
     for(int i=1;i<=30;i++) {
         clockMs+=50;floorY=10+i*.1f;update_support(c,true,nullptr);
@@ -142,6 +170,7 @@ int main() {
         float speed=i*.25f<20 ? i*.25f:20;
         float dy=(i<=120 ? 1:-1)*speed*dt/1000;
         clockMs+=dt;floorY+=dy;update_support(c,true,nullptr);
+        if(!g_supportValid)fprintf(stderr,"Lost at %d: floor=%f tracked=%f feet=%f dy=%f\n",i,floorY,g_supportRayFloor,c.hunterPos[1],dy);
         assert(g_supportValid);
         // START_CLIENT_TICK has already moved BOTH render endpoints; the
         // acknowledgement must contain all that applied travel, even at pt=0.
@@ -197,5 +226,5 @@ int main() {
 (OUT / 'native.cpp').write_text(native, encoding='utf-8')
 cxx = next((ROOT / '.tools/compiler').glob('*/bin/clang++.exe'))
 exe = OUT / 'native.exe'
-subprocess.run([str(cxx), '-std=c++17', '-static', str(OUT / 'native.cpp'), '-o', str(exe)], check=True)
+subprocess.run([str(cxx), '-std=c++17', '-static', '-I', str(ROOT/'bridge-base/elden-ring/er-bridge/include'), str(OUT / 'native.cpp'), '-o', str(exe)], check=True)
 subprocess.run([str(exe)], check=True)

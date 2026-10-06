@@ -2,6 +2,7 @@ package dev.ermc.bridge.client;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.GlStateManager;
+import dev.ermc.bridge.link.ErLink;
 import org.lwjgl.opengl.*;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
@@ -34,7 +35,11 @@ final class GpuTransport {
             supported=c.GL_EXT_memory_object_win32 && c.GL_EXT_semaphore_win32;
             checked=true; LoggerFactory.getLogger("erbridge").info("GPU sharing extensions supported: {}",supported);
         }
-        if(!supported || shared.getInt(0x40)!=0x47504d43 || shared.getInt(0x44)!=w || shared.getInt(0x48)!=h || shared.getInt(0x54)!=SLOTS) return false;
+        // frames.shm survives Elden Ring restarts. Its old named resources no
+        // longer exist: importing them can report GL_OUT_OF_MEMORY on NVIDIA.
+        int hostProcessId=ErLink.get().hostProcessId();
+        if(!supported || hostProcessId==0 || shared.getInt(0x40)!=0x47504d43 || shared.getInt(0x50)!=hostProcessId
+            || shared.getInt(0x44)!=w || shared.getInt(0x48)!=h || shared.getInt(0x54)!=SLOTS) return false;
         int next=shared.getInt(0x4c);
         if(next==failedGeneration) return false;
         if(next==generation) return true;

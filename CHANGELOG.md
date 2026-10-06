@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0 — 2026-10-06
+
+### Terrain collision
+
+- Improved terrain collision and reduced generation overhead.
+- Added predictive refinement of doorways, stairs and narrow passages while
+  preserving real walls, floors, ceilings and previously verified clearance.
+
+### World commands
+
+- Synchronized Minecraft weather and time commands with Elden Ring.
+- Preserved world settings and native scripted weather, with consistent rain
+  in bridge worlds.
+
+### Windows overlay
+
+- Improved overlay focus, Alt+Tab and F8 switching.
+- Restored the native cursor in Minecraft menus and hid the taskbar during play.
+- Kept loading screens transparent and recovered frame transfer after interruptions.
+
 ## 0.2.0 — 2026-10-03
 
 Major update to the experimental Windows bridge.

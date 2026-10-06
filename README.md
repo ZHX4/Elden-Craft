@@ -6,7 +6,7 @@
 
 [![Windows x64](https://img.shields.io/badge/platform-Windows_x64-0078D4)](#requirements)
 [![Minecraft 1.21.1](https://img.shields.io/badge/Minecraft-1.21.1-62B47A)](#requirements)
-[![Experimental 0.2.0](https://img.shields.io/badge/status-experimental_0.2.0-D9A441)](CHANGELOG.md)
+[![Experimental 0.3.0](https://img.shields.io/badge/status-experimental_0.3.0-D9A441)](CHANGELOG.md)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 Minecraft Ring runs real Minecraft Java Edition alongside Elden Ring. Explore
@@ -52,18 +52,15 @@ hand, character and HUD. Both games stay running throughout a session.
 - **Control switching.** F8 hands camera and controls to Elden Ring for its
   menus and normal gameplay. Press it again to return to Minecraft.
 
-## What's new in 0.2.0
+## What's new in 0.3.0
 
-This update focuses on moving around Elden Ring's world: moving platforms now
-publish nearby boarding collision and track passengers, narrow passages receive
-finer collision shapes, and terrain is prefetched along your route. Door changes
-invalidate stale collision samples, while overhead geometry is checked before
-it can become a solid column.
+Terrain collision now uses predictive passage refinement and reuses verified
+clearance to reduce generation overhead. Minecraft weather and time commands
+control Elden Ring's world while preserving native scripted events.
 
-The Windows overlay now works without Borderless Fullscreen or b100lib. F8
-suspends camera publishing and retires pending GPU captures so frame transfer
-can resume after the handoff. Native fault recording adds context, thread stacks
-and minidumps for debugging. See the [changelog](CHANGELOG.md) for the full list.
+The Windows overlay improves focus, Alt+Tab and F8 switching, restores the
+native cursor in Minecraft menus, and keeps loading screens transparent.
+See the [changelog](CHANGELOG.md) for the full list.
 
 ## Requirements
 

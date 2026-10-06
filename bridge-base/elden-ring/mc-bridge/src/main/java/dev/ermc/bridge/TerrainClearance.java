@@ -8,6 +8,25 @@ public final class TerrainClearance {
 	public static final int RAYS_PER_CELL = 29;
 	public static final double HEAD = 1.875;
 	public static final double FLOOR_RANGE = 0.3;
+	public static final double BODY_HEIGHT = 1.801;
+	public static final double DETAIL_DROP = 6;
+	public static final double DETAIL_RISE = .625;
+
+	/** Floors may descend through a doorway; the five points must agree locally. */
+	public static boolean supportedCell(double min, double max, double feet) {
+		return Double.isFinite(min) && Double.isFinite(max) && min <= max
+			&& min >= feet - DETAIL_DROP && max <= feet + DETAIL_RISE
+			&& max - min <= DETAIL_RISE;
+	}
+
+	/** Quantize toward solid surfaces, keeping the real floor and ceiling. */
+	public static int carveBetween(int mask, int blockY, double floor, double ceiling) {
+		if (!Double.isFinite(floor) || !Double.isFinite(ceiling) || ceiling <= floor) return mask;
+		int lo = Math.max(0, Math.min(16, (int)Math.ceil((floor - blockY) * 16 - 1e-4)));
+		int hi = Math.max(0, Math.min(16, (int)Math.floor((ceiling - blockY) * 16 + 1e-4)));
+		if (hi <= lo) return mask;
+		return mask & ~(((1 << hi) - 1) & ~((1 << lo) - 1)) & 0xFFFF;
+	}
 	public record Segment(double x0, double z0, double x1, double z1) {}
 	/** Diagonals catch walls which clip a column's corner but miss both centre lines. */
 	public static final java.util.List<Segment> WALL_SEGMENTS = java.util.List.of(

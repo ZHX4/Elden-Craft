@@ -19,6 +19,8 @@ public final class MovingPlatformClient {
 	private static long loggedAt;
 	private MovingPlatformClient() {}
 
+	public static void onTeleport() { MOTION.reset(); BOARDING.reset(); }
+
 	public static void tick(Minecraft mc) {
 		var map = CoordMap.get();
 		if (mc.player == null || mc.level == null || !TerrainManager.isBridgeWorld() || !Overlay.active() || Overlay.hostMode()

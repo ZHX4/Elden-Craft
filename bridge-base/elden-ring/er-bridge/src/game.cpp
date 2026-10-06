@@ -21,9 +21,12 @@
 // or loading, and moves its player to the Tarnished once it is usable again (hostLife).
 #include "common.h"
 #include "player_facing.h"
+#include "world_environment.h"
+#include "support_surface.h"
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <wchar.h>
 
 namespace mb {
 
@@ -148,6 +151,187 @@ static uint8_t* global_ptr(uintptr_t rvaAddr, uintptr_t vtRva) {
     void* p = nullptr;
     if (!mem_read((void*)(g_base + rvaAddr), &p, 8)) return nullptr;
     return vtRva ? typed(p, vtRva) : (uint8_t*)p;
+}
+
+
+// Optional world commands. These layouts and entry points were checked against
+// eldenring.exe 2.7.1.0; WorldAreaTime::request_time is also documented by
+// https://github.com/vswarte/fromsoftware-rs/blob/main/crates/eldenring/src/cs/world_area_time.rs
+static bool g_environmentOk = false;
+static uint8_t* g_environmentTime = nullptr;
+static uint8_t* g_environmentWeather = nullptr;
+static float g_environmentTimeRate = 1.0f;
+static uint32_t g_environmentTimeRevision = ~0u, g_environmentWeatherRevision = ~0u;
+static uint32_t g_environmentTicks = ~0u, g_environmentWeatherKind = ~0u;
+static uint32_t g_environmentZone = ~0u;
+static uint64_t g_environmentWeatherMs = 0;
+static uint64_t g_environmentTimeMs = 0;
+static int8_t g_environmentIndoorOverride = -1;
+static uint64_t g_environmentHeartbeat = 0, g_environmentHeartbeatMs = 0;
+using RequestWorldTime = void(__fastcall*)(void*, uint32_t, uint32_t, uint32_t);
+struct EnvironmentWeatherRequest {
+    int16_t area, kind;
+    int32_t seconds;
+    uint8_t immediate, scripted;
+    uint16_t padding;
+};
+static_assert(sizeof(EnvironmentWeatherRequest) == 12);
+using RequestWorldWeather = bool(__fastcall*)(void*, const EnvironmentWeatherRequest*);
+using RequestRegionalWeather = bool(__fastcall*)(void*, const uint32_t*, bool);
+
+static bool scripted_weather(const uint8_t* weather) {
+    // F9 belongs exclusively to ChangeWeather's timed script override. Ordinary
+    // requests use 6480C0, which respects that override and the fixed-weather lock.
+    // F7 is also used by normal regional weather and must not suspend the bridge.
+    return weather[0xF5] || weather[0xF9] || weather[0x91] ||
+        *(const int16_t*)(weather + 0x21C) != -1;
+}
+
+static void release_environment_time() {
+    uint8_t* time = global_ptr(0x3D6D368, 0);
+    if (g_environmentTime && time == g_environmentTime && mem_readable(time, 0x48)) {
+        // A script may have changed the rate since we acquired the clock.
+        if (*(float*)(time + 0x38) == 0.0f) *(float*)(time + 0x38) = g_environmentTimeRate;
+    }
+    g_environmentTime = nullptr;
+    g_environmentTicks = ~0u;
+}
+
+static void release_environment_weather(bool regional) {
+    uint8_t* weather = global_ptr(0x3D6D3F0, 0);
+    if (g_environmentWeather && weather == g_environmentWeather && mem_readable(weather, 0x220)) {
+        if (*(int8_t*)(weather + 0x20F) == 1) *(int8_t*)(weather + 0x20F) = g_environmentIndoorOverride;
+        int16_t kind = environment_weather(g_environmentWeatherKind);
+        // Withdraw only our ordinary pending requests; never cancel a queued script.
+        for (int offset = 0; offset <= 12; offset += 12) {
+            auto* pending = (EnvironmentWeatherRequest*)(weather + offset);
+            if (pending->area > 0 && pending->kind == kind && !pending->scripted) {
+                pending->area = 0;
+                pending->kind = -1;
+            }
+        }
+        if (regional && !scripted_weather(weather)) {
+            uint32_t block = g_environmentZone;
+            // With no current type the regional request chooses its WeatherLot
+            // entry, instead of keeping the bridge's last rain/storm type.
+            int16_t current = *(int16_t*)(weather + 0x2A);
+            *(int16_t*)(weather + 0x2A) = -1;
+            ((RequestRegionalWeather)(g_base + 0x6481B0))(weather, &block, false);
+            *(int16_t*)(weather + 0x2A) = current;
+        }
+    }
+    g_environmentWeather = nullptr;
+    g_environmentWeatherKind = g_environmentZone = ~0u;
+}
+
+static void release_environment() {
+    release_environment_time();
+    release_environment_weather(true);
+}
+
+static void service_environment(bool ready, uint32_t zone) {
+    if (!g_environmentOk) return;
+    ErmcHeader* h = shm_header();
+    if (!h) return;
+    uint64_t now = now_ms();
+    uint64_t heartbeat = h->mcHeartbeat;
+    if (heartbeat != g_environmentHeartbeat) {
+        g_environmentHeartbeat = heartbeat;
+        g_environmentHeartbeatMs = now;
+    }
+    if (!ready || !g_environmentHeartbeatMs || now - g_environmentHeartbeatMs > 2000) {
+        release_environment();
+        return;
+    }
+    ErmcEnvironment* mailbox = (ErmcEnvironment*)((uint8_t*)h + ERMC_OFF_ENVIRONMENT);
+    uint32_t seq = mailbox->seq;
+    if (!seq || (seq & 1)) return;
+    MemoryBarrier();
+    ErmcEnvironment env;
+    memcpy(&env, mailbox, sizeof(env));
+    MemoryBarrier();
+    if (mailbox->seq != seq) return;
+    if (!env.flags) {
+        release_environment();
+        return;
+    }
+    if (env.dayTicks >= 24000 || env.weather > 2) return;
+    uint8_t* weather = global_ptr(0x3D6D3F0, 0);
+    uint8_t* time = global_ptr(0x3D6D368, 0);
+    bool haveWeather = weather && mem_readable(weather, 0x220);
+    bool haveTime = time && mem_readable(time, 0x48);
+    // A native clock hold/cutscene or scripted weather takes priority over both
+    // clocks and precipitation. Minecraft keeps ticking and resumes afterwards.
+    bool scriptedTime = haveTime && (time[0x45] || *(int32_t*)(time + 0x40) > 0);
+    uint16_t clockHold = 0;
+    mem_read((void*)(g_base + 0x3D6D370), &clockHold, sizeof(clockHold));
+    bool scripted = scriptedTime || clockHold || (haveWeather && scripted_weather(weather));
+    if (scripted) {
+        release_environment_time();
+        release_environment_weather(!haveWeather || !scripted_weather(weather));
+        return;
+    }
+    if ((env.flags & ERMC_ENV_TIME) && haveTime) {
+        if (time != g_environmentTime) {
+            float rate = *(float*)(time + 0x38);
+            if (!isfinite(rate) || rate < 0 || rate > 1000) return;
+            g_environmentTimeRate = rate;
+            g_environmentTime = time;
+            g_environmentTicks = ~0u;
+        }
+        // Minecraft owns the ordinary clock. Its gamerule
+        // advances it; the host must not independently advance it as well.
+        *(float*)(time + 0x38) = 0.0f;
+        uint32_t seconds = environment_seconds(env.dayTicks);
+        uint64_t packed = *(uint64_t*)(time + 0x08);
+        uint32_t hostSeconds = ((packed >> 34) & 31) * 3600 + ((packed >> 39) & 63) * 60 + ((packed >> 45) & 63);
+        if (env.dayTicks != g_environmentTicks || env.timeRevision != g_environmentTimeRevision ||
+            (hostSeconds != seconds && now - g_environmentTimeMs >= 250)) {
+            ((RequestWorldTime)(g_base + 0x644EF0))(time, seconds / 3600, seconds / 60 % 60, seconds % 60);
+            g_environmentTimeMs = now;
+            g_environmentTicks = env.dayTicks;
+            g_environmentTimeRevision = env.timeRevision;
+        }
+    } else {
+        release_environment_time();
+    }
+    if ((env.flags & ERMC_ENV_WEATHER) && haveWeather) {
+        bool newManager = weather != g_environmentWeather;
+        if (newManager) {
+            g_environmentIndoorOverride = *(int8_t*)(weather + 0x20F);
+        }
+        int16_t kind = environment_weather(env.weather);
+        // Allow outdoor precipitation in every ordinary region. Leave the
+        // native fixed-weather lock untouched so story scripts remain usable.
+        bool matchingPending = false;
+        for (int offset = 0; offset <= 12; offset += 12) {
+            const auto* pending = (const EnvironmentWeatherRequest*)(weather + offset);
+            matchingPending |= pending->area == (int16_t)(zone >> 24) &&
+                pending->kind == kind && !pending->scripted;
+        }
+        bool matchingCurrent = *(int16_t*)(weather + 0x2A) == kind;
+        if (newManager || zone != g_environmentZone || env.weather != g_environmentWeatherKind ||
+            (!matchingPending && !matchingCurrent && now - g_environmentWeatherMs >= 1000)) {
+            // Use the game's weather request, which updates sky, fog and native
+            // weather assets together. The Minecraft timer decides when to change.
+            // Negative duration is the native non-expiring ordinary weather mode.
+            // immediate=0 lets the engine blend sky, fog, precipitation and audio.
+            EnvironmentWeatherRequest request = {(int16_t)(zone >> 24), kind, -1, 0, 0, 0};
+            if (!((RequestWorldWeather)(g_base + 0x6480C0))(weather, &request)) {
+                release_environment_weather(false);
+                return;
+            }
+            g_environmentWeather = weather;
+            g_environmentWeatherKind = env.weather;
+            g_environmentWeatherRevision = env.weatherRevision;
+            g_environmentZone = zone;
+            g_environmentWeatherMs = now;
+        }
+        g_environmentWeatherRevision = env.weatherRevision;
+        *(int8_t*)(weather + 0x20F) = 1;
+    } else {
+        release_environment_weather(true);
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1813,19 +1997,22 @@ static void update_support(const ErmcControl& c, bool active, void* ignore) {
     if (valid && g_supportValid) {
         // Recheck the PREVIOUS point. Walking along static stairs or a slope
         // changes the floor under the new feet, but is not platform movement.
-        ErmcRayHit hit;
         // The lift accelerates past the old 8 m/s limit. Cover its travel
         // during this game tick, including a brief delayed frame.
         float range = .1f + 24.0f * (float)(elapsed < 250 ? elapsed : 250) / 1000.0f;
-        float s[3] = {g_supportPos[0], g_supportRayFloor + range, g_supportPos[2]};
-        float e[3] = {s[0], g_supportRayFloor - range, s[2]};
-        valid = raycast(s, e, kTerrainRayFilter, ignore, &hit) && hit.hit;
+        float nearest = g_supportRayFloor;
+        valid = nearest_support(g_supportPos, g_supportRayFloor, range,
+            [&](const float* s, const float* e, float* point) {
+                ErmcRayHit sample;
+                if (!raycast(s, e, kTerrainRayFilter, ignore, &sample) || !sample.hit) return false;
+                memcpy(point, sample.pos, 12); return true;
+            }, nearest);
         lost = "previous floor ray";
         if (valid) {
-            float dy = hit.pos[1] - g_supportRayFloor;
+            float dy = nearest - g_supportRayFloor;
             valid = elapsed <= 250 && fabsf(dy) <= .05f + 24.0f * elapsed / 1000.0f;
             lost = "travel discontinuity";
-            if (valid) { travel += dy; trackedFloor = hit.pos[1]; }
+            if (valid) { travel += dy; trackedFloor = nearest; }
         }
     }
     float feetY = c.hunterPos[1];
@@ -1937,8 +2124,14 @@ static void update_platform_cells(const ErmcControl& c, bool active, uint32_t zo
         float floor = present ? hit.pos[1] : old.floor;
         uint64_t elapsed = now - old.at;
         if (old.at && elapsed <= 250 && old.hit && present
-            && fabsf(floor - old.floor) > .008f && fabsf(floor - old.floor) <= .05f + 24 * elapsed / 1000.0f)
-            old.moved = now;
+            && fabsf(floor - old.floor) > .008f && fabsf(floor - old.floor) <= .05f + 24 * elapsed / 1000.0f) {
+            // Repeat the PREVIOUS query at the same point. Moving the player's
+            // ray window past a static ceiling is not platform travel.
+            float a[3] = {x, old.high, z}, b[3] = {x, old.low, z};
+            ErmcRayHit tracked;
+            if (raycast(a, b, kTerrainRayFilter, ignore, &tracked) && tracked.hit
+                    && fabsf(tracked.pos[1] - floor) < .02f) old.moved = now;
+        }
         // Missing evidence is never permission to carve walls. A disappearing
         // floor is removed only after the old surface volume is checked empty.
         bool moving = old.moved && now - old.moved < 1500;
@@ -1956,7 +2149,7 @@ static void update_platform_cells(const ErmcControl& c, bool active, uint32_t zo
             cell.x = x; cell.z = z; cell.floor = top; cell.previousFloor = previousTop;
             cell.clearLow = top - .07f;
             cell.clearHigh = top + 2.05f; cell.flags = 1;
-            if (fabsf(previousTop - top) > .008f && platform_clear(x, z, previousTop - .08f, previousTop + .08f, ignore)) cell.flags |= 2;
+            if (moving && fabsf(previousTop - top) > .008f && platform_clear(x, z, previousTop - .08f, previousTop + .08f, ignore)) cell.flags |= 2;
             old.top = top;
         } else if (moving && !present && old.floor > low && old.floor < high
             && platform_clear(x, z, previousTop - .08f, previousTop + .08f, ignore)) {
@@ -2045,17 +2238,9 @@ static bool g_focusSeenInit = false;
 static void handle_switching() {
     HWND hwnd = game_hwnd();
     if (!hwnd) return;
-    bool focused = GetForegroundWindow() == hwnd;
     // Track the physical key even while Minecraft has focus. Holding its F8
     // through the handoff must not count as a second press in Elden Ring.
     bool down = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
-    if (focused && down && !g_f8Down) {
-        ErmcHeader* h = shm_header();
-        h->mcSwitchReq = h->mcSwitchReq + 1;
-        log("switch: F8 in Elden Ring -> back to Minecraft");
-    }
-    g_f8Down = down;
-
     uint32_t req = shm_header()->hostFocusReq;
     if (!g_focusSeenInit) {
         g_focusSeen = req;
@@ -2063,13 +2248,24 @@ static void handle_switching() {
     }
     if (req != g_focusSeen) {
         g_focusSeen = req;
+        // Hiding Minecraft can focus its owner before this tick samples F8.
+        // Handle the explicit handoff first, even if the game missed the key
+        // while loading; that same press must not request Minecraft back.
+        g_f8Down = down;
         ShowWindow(hwnd, SW_RESTORE);
         SetForegroundWindow(hwnd);
         SetActiveWindow(hwnd);
         SetFocus(hwnd);
         log("switch: Minecraft handed control to Elden Ring (foreground %s)",
             GetForegroundWindow() == hwnd ? "ok" : "not yet");
+        return;
     }
+    if (GetForegroundWindow() == hwnd && down && !g_f8Down) {
+        ErmcHeader* h = shm_header();
+        h->mcSwitchReq = h->mcSwitchReq + 1;
+        log("switch: F8 in Elden Ring -> back to Minecraft");
+    }
+    g_f8Down = down;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2103,6 +2299,7 @@ static void __fastcall task_tick(void* /*self*/, const void* /*data*/) {
     memset(&c, 0, sizeof(c));
     bool ctrl = control_active(&c);
     bool alive = havePlayer && g_life == LIFE_ALIVE;
+    service_environment(alive, g_frame.zone);
     update_support(c, alive && ctrl && (c.flags & ERMC_CTRL_MOVE_HUNTER), havePlayer ? p.ins : nullptr);
     update_platform_cells(c, alive && ctrl && (c.flags & ERMC_CTRL_MOVE_HUNTER), g_frame.zone, havePlayer ? p.ins : nullptr);
     if (havePlayer) stand_in(p, &c, alive && ctrl && (c.flags & ERMC_CTRL_MOVE_HUNTER));
@@ -2209,6 +2406,17 @@ bool game_init() {
         }
     }
     if (!g_ok) return false;
+    g_environmentOk = bytes_match(g_base + 0x644EF0, "44 89 4C 24 20 44 89 44 24 18 89 54 24 10 48 83 EC 28") &&
+        bytes_match(g_base + 0x6480C0, "48 89 5C 24 10 48 89 74 24 20 57 48 83 EC 20") &&
+        bytes_match(g_base + 0x6481B0, "40 57 48 83 EC 50 48 C7 44 24 20 FE FF FF FF") &&
+        bytes_match(g_base + 0x648284, "48 8B 0D 65 51 72 03") &&
+        bytes_match(g_base + 0x64A75D, "48 8B 0D 04 2C 72 03") &&
+        bytes_match(g_base + 0x6480D5, "66 83 B9 1C 02 00 00 FF") &&
+        bytes_match(g_base + 0x647979, "0F B6 91 0F 02 00 00") &&
+        bytes_match(g_base + 0x644A61, "44 38 73 45") &&
+        bytes_match(g_base + 0x644A80, "44 39 73 40") &&
+        bytes_match(g_base + 0x644A72, "44 38 35 F7 88 72 03");
+    log("game: world time/weather commands %s", g_environmentOk ? "enabled" : "disabled (signature mismatch)");
     unlock_fps();
     g_combatOk = true;
     for (const CodeSig& a : kCombatSigs) {
@@ -2241,6 +2449,7 @@ void game_detach() {
 }
 
 void game_shutdown() {
+    if (g_environmentOk) release_environment();
     if (g_fpsPatched) {
         float interval = 1.0f / 60.0f;
         mem_write((void*)(g_base + 0xE849C0), &interval, sizeof(interval));

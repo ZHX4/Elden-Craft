@@ -6,7 +6,10 @@
 		"ExplosionMixin",
 		"LivingEntityMixin",
 		"MobMixin",
-		"PlayerMixin"
+		"PlayerMixin",
+		"ServerWeatherMixin",
+		"TimeCommandMixin",
+		"WeatherCommandMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -33,7 +33,10 @@ public final class MovingPlatformMotion {
 			// first client tick that sees it. Catch that crossing on attachment.
 			if (feetY >= top - .45 && feetY <= top + .2) {
 				contact = true; epoch = nextEpoch; travel = nextTravel; floor = nextFloor; sampledAt = now;
-				boolean landed = grounded ? feetY < top - .01 : feetY <= top + .08 && verticalSpeed <= 0;
+				// Native support also reports ordinary ground. An elevated footprint
+				// corner on a static slope must never catch or reposition the player.
+				boolean landed = Math.abs(nextTravel) > .002
+					&& (grounded ? feetY < top - .01 : feetY <= top + .08 && verticalSpeed <= 0);
 				if (landed) {
 					movedAt = now;
 					return new Step(top - feetY, nextFloor, nextFloor, true, true);
@@ -50,9 +53,10 @@ public final class MovingPlatformMotion {
 			reset();
 			return new Step(0, previous, nextFloor, false, false);
 		}
-		boolean landed = !grounded && verticalSpeed <= nextTop - previousTop && feetY <= nextTop + .08
+		boolean movingSurface = moving(now) || Math.abs(change) > .002;
+		boolean landed = movingSurface && !grounded && verticalSpeed <= nextTop - previousTop && feetY <= nextTop + .08
 			&& feetY >= previousTop - .5;
-		double dy = landed ? nextTop - feetY : grounded && Math.abs(change) > 1e-5 ? nextTop - previousTop : 0;
+		double dy = landed ? nextTop - feetY : grounded && Math.abs(change) > .002 ? nextTop - previousTop : 0;
 		travel = nextTravel; floor = nextFloor; sampledAt = now;
 		if (Math.abs(change) > .002) movedAt = now;
 		return new Step(dy, previous, nextFloor, moving(now), landed);

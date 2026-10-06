@@ -34,6 +34,8 @@ ErmcRayHeader* shm_rays();
 ErmcEntityTable* shm_entities();
 ErmcPassageTable* shm_passages();
 ErmcPlatformTable* shm_platforms();
+ErmcTerrainContacts* shm_contacts();
+ErmcCollisionControl* shm_collision_control();
 ErmcHunterEvents* shm_hunter();
 ErmcDamageQueue* shm_damage();
 
