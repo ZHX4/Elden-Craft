@@ -1,13 +1,20 @@
 # Elden-Craft
 
-![Minecraft Ring gameplay in Elden Ring](docs/images/minecraft-ring.jpg)
+![Elden-Craft — two worlds, one session](docs/images/elden-craft-cover.png)
 
 **A Windows-focused experimental fork of Minecraft Ring by siddoff.**
 
 [![Windows x64](https://img.shields.io/badge/platform-Windows_x64-0078D4)](#requirements)
 [![Minecraft 1.21.1](https://img.shields.io/badge/Minecraft-1.21.1-62B47A)](#requirements)
 [![Experimental 0.3.0](https://img.shields.io/badge/status-experimental_0.3.0-D9A441)](CHANGELOG.md)
+[![GitHub stars](https://img.shields.io/github/stars/ZHX4/Elden-Craft?style=flat&logo=github&label=stars)](https://github.com/ZHX4/Elden-Craft/stargazers)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+[Download the Windows preview](https://github.com/ZHX4/Elden-Craft/releases/tag/v0.3.0-tlauncher-preview.1) ·
+[Watch the 1080p quick-start tutorial](https://github.com/ZHX4/Elden-Craft/releases/download/v0.3.0-tlauncher-preview.1/Elden-Craft-Quick-Start-Tutorial.mp4) ·
+[Quick-start guide](docs/installation.md) ·
+[Changelog](CHANGELOG.md) ·
+[Report a problem](https://github.com/ZHX4/Elden-Craft/issues/new/choose)
 
 Elden-Craft carries Minecraft Ring's crossover gameplay into a portable
 Windows launcher workflow. Run real Minecraft Java Edition alongside Elden
@@ -48,6 +55,10 @@ license information.
 
 [Setup guide](docs/installation.md) · [Development and diagnostics](docs/development.md) ·
 [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/ZHX4/Elden-Craft/issues)
+
+## In-game preview
+
+![Minecraft blocks composited into Elden Ring gameplay](docs/images/minecraft-ring.jpg)
 
 ## What works
 

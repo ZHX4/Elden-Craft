@@ -1,5 +1,17 @@
 # Changelog
 
+## Elden-Craft preview — `v0.3.0-tlauncher-preview.1` — 2026-10-08
+
+- Added a branded portable Windows launcher with custom Elden Ring executable
+  paths and a selectable optional TLauncher workflow.
+- Added a Windows x64 prerelease package with a file manifest and SHA-256
+  checksums, plus a chaptered 1080p quick-start video.
+- Kept native launch restricted to Elden Ring App Ver. 1.17.1 / executable
+  build 2.7.1.0. The optional TLauncher profile and mod checks pass, but its
+  complete bridge/F8 flow has not been verified end-to-end.
+- Offline single-player only. This is an experimental prerelease, not a stable
+  or universal compatibility claim.
+
 ## 0.3.0 — 2026-10-06
 
 ### Terrain collision

@@ -20,6 +20,7 @@
 !/docs/images/
 /docs/images/*
 !/docs/images/minecraft-ring.jpg
+!/docs/images/elden-craft-cover.png
 !/LICENSE
 !/THIRD_PARTY_NOTICES.md
 !/Install.ps1
