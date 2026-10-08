@@ -892,6 +892,7 @@ void compositor_depth_poll() {
 
 static bool g_testWasOn = false;
 static bool g_loggedFirstMc = false;
+static bool g_occlusionFallback = false;
 
 static double perf_ms() {
     LARGE_INTEGER t, f; QueryPerformanceCounter(&t); QueryPerformanceFrequency(&f);
@@ -1063,6 +1064,21 @@ static void composite(IDXGISwapChain* sc, UINT flags) {
         } else log("depth: copy creation failed %08lx", (unsigned long)result);
     }
     haveDepth &= g_nativeDepthCopy != nullptr && hostDepth.resource == g_nativeDepthSource;
+    // A Minecraft world frame without the host scene depth is an x-ray overlay, not a
+    // world composite. Fail closed: leave Elden Ring's back buffer untouched and let the
+    // Minecraft-side overlay window become visible until valid host depth returns.
+    if (mc && !haveDepth) {
+        if (!g_occlusionFallback) {
+            g_occlusionFallback = true;
+            log("depth: no current Elden Ring scene depth; skipping Minecraft composite (overlay fallback)");
+        }
+        g_list->Close();
+        return;
+    }
+    if (mc && g_occlusionFallback) {
+        g_occlusionFallback = false;
+        log("depth: Elden Ring scene depth restored; Minecraft occlusion composite resumed");
+    }
     ErmcGameState* st = shm_state();
     Params p = {};
     p.mcNear = slot ? slot->mcNear : 0.05f;

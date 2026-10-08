@@ -2,7 +2,7 @@
 
 [Back to Minecraft Ring](../README.md)
 
-Open the [issue chooser](https://github.com/siddoff/Minecraft-Ring/issues/new/choose)
+Open the [issue chooser](https://github.com/ZHX4/Elden-Craft/issues/new/choose)
 and select **Bug report**, **Feature request**, or **Question or setup help**.
 English and Russian reports are welcome. Search existing issues first.
 

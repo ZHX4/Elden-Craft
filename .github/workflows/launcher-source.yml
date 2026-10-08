@@ -1,0 +1,37 @@
+name: Verify launcher source
+
+on:
+  push:
+    paths:
+      - 'launcher/**'
+      - 'tools/package_launcher.py'
+      - '.github/workflows/launcher-source.yml'
+  pull_request:
+    paths:
+      - 'launcher/**'
+      - 'tools/package_launcher.py'
+      - '.github/workflows/launcher-source.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launcher-source-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate launcher syntax and safety policy
+        shell: pwsh
+        run: ./launcher/Test-LauncherSource.ps1
+
+      - name: Validate release packager syntax
+        shell: pwsh
+        run: python -m py_compile tools/package_launcher.py

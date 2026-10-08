@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         You can write in English or Russian.
-        Read the [setup guide](https://github.com/siddoff/Minecraft-Ring/blob/main/docs/installation.md) and search existing issues first.
+        Read the [setup guide](https://github.com/ZHX4/Elden-Craft/blob/main/docs/installation.md) and search existing issues first.
         If something reproducibly fails, use the Bug report form instead.
   - type: dropdown
     id: area

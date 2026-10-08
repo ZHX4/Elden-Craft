@@ -10,6 +10,7 @@
 !/.github/workflows/
 /.github/workflows/*
 !/.github/workflows/issue-labels.yml
+!/.github/workflows/launcher-source.yml
 !/.github/labels.json
 !/README.md
 !/CHANGELOG.md
@@ -26,9 +27,18 @@
 !/Restore.ps1
 !/Play.bat
 !/start.bat
+!/launcher/
+/launcher/*
+!/launcher/README.md
+!/launcher/Launcher.ps1
+!/launcher/compatibility-profiles.json
+!/launcher/Run Minecraft Ring.cmd
+!/launcher/Test-LauncherSource.ps1
+!/docs/repository-metadata.md
 !/tools/
 /tools/*
 !/tools/*.py
+!/tools/package_launcher.py
 /tools/adapt_windows.py
 # Local reverse-engineering helpers depend on an unpublished erctl module.
 /tools/read_poke_params.py

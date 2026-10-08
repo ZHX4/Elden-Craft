@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         You can write in English or Russian. Search existing issues before reporting.
-        Check the [setup guide](https://github.com/siddoff/Minecraft-Ring/blob/main/docs/installation.md#troubleshooting) for known startup problems.
+        Check the [setup guide](https://github.com/ZHX4/Elden-Craft/blob/main/docs/installation.md#troubleshooting) for known startup problems.
   - type: dropdown
     id: area
     attributes:

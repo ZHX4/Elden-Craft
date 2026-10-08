@@ -13,8 +13,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * The host game supplies the sky, clouds and weather; Minecraft's would paint over them. The
- * selection outline stays, also on Elden Ring's invisible ground and walls: it shows where a
- * block will go.
+ * block-selection outline remains part of the world capture so the host compositor can apply
+ * Elden Ring scene-depth occlusion to it like any other Minecraft world pixel.
  */
 @Mixin(LevelRenderer.class)
 public abstract class LevelRendererMixin {

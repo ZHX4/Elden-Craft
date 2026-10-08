@@ -20,10 +20,12 @@ hand, character and HUD. Both games stay running throughout a session.
 
 > **Experimental Windows port.** Local gameplay has been tested, but terrain,
 > transitions, moving platforms and rendering still have rough edges. The
-> supported setup is offline single-player on the game versions below.
+> supported native host setup is offline single-player on the game versions
+> below. The optional TLauncher launch path is still awaiting end-to-end
+> bridge/F8 verification.
 
 [Setup guide](docs/installation.md) · [Development and diagnostics](docs/development.md) ·
-[Changelog](CHANGELOG.md) · [Report an issue](https://github.com/siddoff/Minecraft-Ring/issues)
+[Changelog](CHANGELOG.md) · [Report an issue](https://github.com/ZHX4/Elden-Craft/issues)
 
 ## What works
 
@@ -80,14 +82,42 @@ Elden Ring build.
 
 ## Getting started
 
-The repository contains source and launch scripts. Toolchains and game
-installations are obtained separately; there is no packaged installer yet.
+The repository contains source, launch scripts and a standalone Windows
+launcher. Toolchains and game installations are obtained separately. For the
+portable launcher, see [the launcher guide](launcher/README.md) and download
+the matching archive from the GitHub Releases page; the launcher archive is a
+release asset, not committed into the source tree.
+
+## Standalone Windows launcher
+
+The optional launcher provides a portable interface for selecting an Elden
+Ring executable at any installation path and choosing either bundled Prism or
+an existing TLauncher installation. It gates native startup on the exact
+Elden Ring executable build, starts the game offline through Mod Engine 3,
+and waits for a fresh bridge-ready signal before opening Minecraft. The
+TLauncher account login and Fabric profile selection remain manual.
+
+The launcher asks existing Minecraft Java game windows to close normally before
+starting a new session. It does not force-kill Java, remove `session.lock`,
+delete worlds, read account credentials, or write into Elden Ring's install
+folder. Custom install paths are supported; this does not make unsupported
+Elden Ring versions compatible.
+
+The only currently enabled native host profile is Elden Ring App Ver. 1.17.1
+(executable 2.7.1.0). The TLauncher profile/mod checks pass locally, but the
+TLauncher-to-bridge telemetry and F8 handoff still need a complete acceptance
+run before they can be called verified. See the [launcher compatibility
+notes](launcher/README.md#compatibility-and-verification).
+
+### Build and install from source
+
+The steps below are for developers who want to build from source.
 
 1. Clone the project:
 
    ```powershell
-   git clone https://github.com/siddoff/Minecraft-Ring.git
-   cd Minecraft-Ring
+   git clone https://github.com/ZHX4/Elden-Craft.git
+   cd Elden-Craft
    ```
 
 2. Prepare the tools described in the [setup guide](docs/installation.md#toolchains),
@@ -145,7 +175,7 @@ Minecraft-driven movement.
   Automatic tool installation and a portable release are still outstanding.
 
 For startup or rendering problems, see [troubleshooting](docs/installation.md#troubleshooting).
-Use the [issue forms](https://github.com/siddoff/Minecraft-Ring/issues/new/choose)
+Use the [issue forms](https://github.com/ZHX4/Elden-Craft/issues/new/choose)
 for bugs, feature requests and setup questions; English and Russian are welcome.
 The [issue guide](docs/issues.md) explains automatic labels and useful report details.
 To disable the bridge, close Elden Ring and run `Restore.ps1`; it restores the

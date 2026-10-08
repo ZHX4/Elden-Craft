@@ -6,6 +6,10 @@ This guide describes the current source-build workflow for Minecraft Ring
 0.3.0. It targets Windows x64, Elden Ring App Ver. 1.17.1 (`eldenring.exe`
 2.7.1.0), and Minecraft Java Edition 1.21.1.
 
+For a ready-to-run portable launcher, use the GitHub Release archive and follow
+[`launcher/README.md`](../launcher/README.md). The source-build steps below are
+for developers and do not install or configure TLauncher.
+
 ## Toolchains
 
 Install Python 3 and place the extracted build tools in the following layout:

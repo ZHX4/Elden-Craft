@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "game": "elden-ring",
+  "modVersion": "Minecraft Ring 0.3.0 (upstream bridge)",
+  "profiles": [
+    {
+      "productVersion": "2.7.1.0",
+      "launchAllowed": true,
+      "verification": "upstream-target-and-local-native-host-runtime-observed; end-to-end-bridge-pending",
+      "note": "This PC launched 2.7.1.0 offline and initialized the native host hooks. The Minecraft-to-Elden Ring bridge and F8 handoff are not yet verified."
+    },
+    {
+      "productVersion": "2.7.1.1",
+      "launchAllowed": false,
+      "verification": "blocked-until-native-profile-and-runtime-test",
+      "note": "The original release range is not sufficient proof that every native address matches. This exact build has not been independently validated."
+    },
+    {
+      "productVersion": "2.6.0.0",
+      "launchAllowed": false,
+      "verification": "blocked-until-native-profile-and-runtime-test",
+      "note": "Installed locally, but upstream native addresses/signatures do not all match this build."
+    }
+  ]
+}
