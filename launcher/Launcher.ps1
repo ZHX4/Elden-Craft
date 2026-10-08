@@ -334,21 +334,21 @@ Initialize-Package
 New-Item -ItemType Directory -Path $script:RuntimeRoot -Force | Out-Null
 
 $form = New-Object Windows.Forms.Form
-$form.Text = 'Minecraft Ring - Windows Launcher'
+$form.Text = 'Elden-Craft - Windows Launcher'
 $form.StartPosition = 'CenterScreen'
 $form.Size = New-Object Drawing.Size(850, 630)
 $form.MinimumSize = New-Object Drawing.Size(780, 560)
 $form.Font = New-Object Drawing.Font('Segoe UI', 9)
 
 $heading = New-Object Windows.Forms.Label
-$heading.Text = 'Minecraft Ring'
+$heading.Text = 'Elden-Craft'
 $heading.Font = New-Object Drawing.Font('Segoe UI Semibold', 18)
 $heading.Location = New-Object Drawing.Point(22, 16)
 $heading.Size = New-Object Drawing.Size(400, 34)
 $form.Controls.Add($heading)
 
 $subheading = New-Object Windows.Forms.Label
-$subheading.Text = 'Experimental offline bridge - Minecraft 1.21.1 - TLauncher optional'
+$subheading.Text = 'Experimental fork of Minecraft Ring - offline - TLauncher optional'
 $subheading.Location = New-Object Drawing.Point(24, 52)
 $subheading.Size = New-Object Drawing.Size(650, 22)
 $form.Controls.Add($subheading)

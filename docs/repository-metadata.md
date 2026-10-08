@@ -2,7 +2,7 @@
 
 Suggested repository description:
 
-> An experimental offline Windows bridge for Minecraft Java Edition and Elden Ring, with an optional TLauncher workflow.
+> Elden-Craft is an experimental Windows fork of Minecraft Ring, with a portable launcher and optional TLauncher workflow (end-to-end testing pending).
 
 Suggested topics: `minecraft`, `elden-ring`, `fabric`, `windows`, `game-modding`,
 `tlauncher`, `offline-play`.

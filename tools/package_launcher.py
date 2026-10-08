@@ -68,7 +68,7 @@ def inspect_payload(path: Path, kind: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--main-archive", type=Path, required=True, help="Built Minecraft Ring/ME3 archive")
+    parser.add_argument("--main-archive", type=Path, required=True, help="Built Elden-Craft/Minecraft Ring/ME3 archive")
     parser.add_argument("--minecraft-archive", type=Path, required=True, help="Built portable Prism/Fabric archive")
     parser.add_argument("--output", type=Path, required=True, help="Output .zip path")
     args = parser.parse_args()
@@ -107,7 +107,7 @@ def main() -> int:
             raise ValueError(f"Refusing to package unexpected enabled native profiles: {enabled}")
 
         manifest = {
-            "product": "Minecraft Ring",
+            "product": "Elden-Craft",
             "packageVersion": "0.3.0-preview",
             "platform": "Windows x64",
             "eldenRing": {"appVersion": "1.17.1", "productVersion": "2.7.1.0"},

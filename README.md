@@ -1,18 +1,19 @@
-# Minecraft Ring
+# Elden-Craft
 
 ![Minecraft Ring gameplay in Elden Ring](docs/images/minecraft-ring.jpg)
 
-**Minecraft movement, building and combat in the Lands Between.**
+**A Windows-focused experimental fork of Minecraft Ring by siddoff.**
 
 [![Windows x64](https://img.shields.io/badge/platform-Windows_x64-0078D4)](#requirements)
 [![Minecraft 1.21.1](https://img.shields.io/badge/Minecraft-1.21.1-62B47A)](#requirements)
 [![Experimental 0.3.0](https://img.shields.io/badge/status-experimental_0.3.0-D9A441)](CHANGELOG.md)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Minecraft Ring runs real Minecraft Java Edition alongside Elden Ring. Explore
-with Minecraft's controls, bring your inventory and skin, build in Elden Ring's
-world, and fight its enemies with Minecraft weapons. Elden Ring keeps running
-its own world, characters, interactions and saves.
+Elden-Craft carries Minecraft Ring's crossover gameplay into a portable
+Windows launcher workflow. Run real Minecraft Java Edition alongside Elden
+Ring, explore with Minecraft's controls, bring your inventory and skin, build
+in Elden Ring's world, and fight its enemies with Minecraft weapons. Elden Ring
+keeps running its own world, characters, interactions and saves.
 
 A native Windows bridge and a Fabric mod connect the games. Minecraft handles
 the player and blocks; Elden Ring draws the combined scene, including Minecraft's
@@ -23,6 +24,27 @@ hand, character and HUD. Both games stay running throughout a session.
 > supported native host setup is offline single-player on the game versions
 > below. The optional TLauncher launch path is still awaiting end-to-end
 > bridge/F8 verification.
+
+## What this fork adds
+
+- **Choose the Elden Ring install location.** The launcher accepts a selected
+  `eldenring.exe` path, including non-Steam folders, while permitting native
+  startup only on Elden Ring App Ver. 1.17.1 / executable 2.7.1.0.
+- **Optional existing TLauncher workflow.** It prepares the bridge mods and
+  starts a fresh TLauncher child with the bridge environment. You sign in and
+  choose Fabric 1.21.1 yourself. The profile/package checks pass, but the
+  complete TLauncher-to-bridge and F8 round trip still needs an end-to-end test.
+- **Safer session cleanup.** It asks old Minecraft game windows to close
+  normally and never force-kills Java or deletes a world lock or save.
+- **Depth-safe rendering fallback.** If the current Elden Ring scene depth is
+  unavailable, the compositor skips that Minecraft world frame instead of
+  drawing it as an x-ray overlay.
+- **Portable packaging checks.** The Windows archive has an explicit file
+  allowlist, exact host-version gate, release manifest, and SHA-256 checksums.
+
+This is a derivative project, not a clean-room reimplementation. See
+[Project and credits](#project-and-credits) for upstream attribution and
+license information.
 
 [Setup guide](docs/installation.md) · [Development and diagnostics](docs/development.md) ·
 [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/ZHX4/Elden-Craft/issues)
@@ -172,7 +194,9 @@ Minecraft-driven movement.
 - Other Elden Ring builds and combinations with other mods are unverified.
 - Multiplayer is unverified; the current supported workflow is single-player.
 - Setup uses a fixed local toolchain layout and a Gradle development client.
-  Automatic tool installation and a portable release are still outstanding.
+  Automated toolchain installation remains outstanding. The optional portable
+  launcher is experimental; its TLauncher bridge path still needs full runtime
+  acceptance testing.
 
 For startup or rendering problems, see [troubleshooting](docs/installation.md#troubleshooting).
 Use the [issue forms](https://github.com/ZHX4/Elden-Craft/issues/new/choose)
@@ -188,8 +212,12 @@ The [native bridge and Fabric mod](bridge-base/elden-ring/README.md) live under
 The [development guide](docs/development.md) covers the protocol, regression
 checks and local data paths.
 
-Based on [minecraft-crossover-bridge](https://github.com/justbustin/minecraft-crossover-bridge)
-by **justbustin**, with Windows adaptation and integration by **siddoff**.
+This Elden-Craft repository is a derivative of [Minecraft Ring](https://github.com/siddoff/Minecraft-Ring)
+by **siddoff**, itself based on
+[minecraft-crossover-bridge](https://github.com/justbustin/minecraft-crossover-bridge)
+by **justbustin**. Elden-Craft's Windows launcher, packaging workflow and
+listed fork-specific changes are maintained here; the upstream bridge and
+Fabric code retain their original attribution and licenses.
 [SkyCraft](https://github.com/chasmlol/SkyCraft) and
 [ArkWeb](https://github.com/luki-1/ArkWeb) informed the architectural research
 and presentation of the project.

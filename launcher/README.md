@@ -1,6 +1,7 @@
 # Standalone Windows launcher
 
-This folder contains the source for Minecraft Ring's optional portable launcher.
+This folder contains the source for Elden-Craft's optional portable launcher,
+maintained as a Windows-focused fork of Minecraft Ring by siddoff.
 The distributable archive is published separately as a GitHub Release asset;
 it includes the two redistributable package archives next to these launcher
 files. Elden Ring itself, Minecraft accounts, and player saves are never
@@ -24,7 +25,7 @@ remain blocked until their own native profile and runtime test are complete.
 1. Download the Windows launcher archive from Releases and extract the complete
    folder. Keep both `MinecraftRing-0.3.0.zip` and
    `MinecraftRing-Minecraft-0.3.0.zip` beside `Launcher.ps1`.
-2. Double-click `Run Minecraft Ring.cmd`.
+2. Double-click `Run Minecraft Ring.cmd` (the original launcher filename).
 3. Browse to your owned `eldenring.exe`. The path may be outside Steam's default
    folder; its executable build must still match the enabled profile.
 4. Select bundled Prism, or select Existing TLauncher, choose its executable
@@ -87,9 +88,15 @@ close must be closed by the player before retrying.
 
 ## Credits and distribution
 
-Minecraft Ring is an unofficial fan project. The native bridge is based on
+Elden-Craft is a derivative, unofficial fan project; it is not a clean-room
+replacement for Minecraft Ring. This launcher adds custom-location selection,
+an optional existing TLauncher workflow, graceful Minecraft-instance cleanup,
+and checksummed packaging. TLauncher sign-in and profile launch are supported
+as an optional path, but the complete bridge/F8 connection is still awaiting
+end-to-end verification. The native bridge is based on
 [`minecraft-crossover-bridge`](https://github.com/justbustin/minecraft-crossover-bridge)
-by justbustin; Windows integration and the launcher are credited to siddoff.
+by justbustin and Minecraft Ring by siddoff; Elden-Craft's Windows launcher
+and this fork's changes are maintained in this repository.
 The upstream package archives retain their license and third-party notices.
 See the repository's [`LICENSE`](../LICENSE) and
 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md). No game executable or
@@ -97,4 +104,4 @@ player data is redistributed.
 
 Suggested GitHub repository description:
 
-> An experimental offline Windows bridge for Minecraft Java Edition and Elden Ring, with an optional TLauncher workflow.
+> Elden-Craft is an experimental Windows fork of Minecraft Ring, with a portable launcher and optional TLauncher workflow (end-to-end testing pending).
